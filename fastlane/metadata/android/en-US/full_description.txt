@@ -1,0 +1,23 @@
+Premium Notes is a private, fully offline handwriting notes application.
+
+Write naturally with a stylus or your finger. A built-in software palm-rejection
+pipeline analyzes raw touch input to reliably ignore palm rests so only your pen
+or writing finger leaves ink.
+
+Features
+- Handwriting notes with low-latency stroke rendering
+- Software palm rejection for passive styluses and fingers
+- Pen, highlighter, eraser, and selection tools
+- Multiple pages per notebook with a page navigator
+- Infinite canvas with pinch-to-zoom and pan
+- Export notes to PDF and share them with other apps
+- Light and dark themes
+- Input diagnostics for calibrating your device
+
+Privacy
+- 100% offline: all notes are stored on your device in a local database
+- No internet permission, no accounts, no tracking, no ads, no analytics
+- No permissions requested at all
+
+Premium Notes is free software, released under the GNU General Public License
+v3 (or later).

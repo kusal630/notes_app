@@ -1,0 +1,9 @@
+Initial release.
+
+- Handwriting notes with software palm rejection
+- Pen, highlighter, eraser, and selection tools
+- Multi-page notebooks with page navigator
+- Pinch-to-zoom and pan on an infinite canvas
+- PDF export with share support
+- Light and dark themes
+- Fully offline, no permissions, no tracking
