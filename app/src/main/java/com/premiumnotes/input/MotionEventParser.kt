@@ -27,35 +27,25 @@ object MotionEventParser {
         val addedPointerId: Int?
         val liftedPointerId: Int?
         when (action) {
+            InputAction.DOWN -> addedPointerId = event.getPointerId(0)
             InputAction.POINTER_DOWN -> addedPointerId = event.getPointerId(event.actionIndex)
             else -> addedPointerId = null
         }
         when (action) {
+            InputAction.UP -> liftedPointerId = event.getPointerId(0)
             InputAction.POINTER_UP -> liftedPointerId = event.getPointerId(event.actionIndex)
             else -> liftedPointerId = null
         }
 
         val contacts = ArrayList<RawTouchContact>(event.pointerCount)
         for (i in 0 until event.pointerCount) {
-            contacts += sample(event, i, event.eventTime, historical = false)
-        }
-
-        val history = ArrayList<RawTouchContact>()
-        if (action == InputAction.MOVE || action == InputAction.POINTER_DOWN) {
-            val hCount = event.historySize
-            for (h in 0 until hCount) {
-                val hTime = event.getHistoricalEventTime(h)
-                for (i in 0 until event.pointerCount) {
-                    history += sample(event, i, hTime, h)
-                }
-            }
+            contacts += sample(event, i, event.eventTime)
         }
 
         return InputFrame(
             action = action,
             eventTimeNanos = event.eventTime * 1_000_000L,
             contacts = contacts,
-            history = history,
             addedPointerId = addedPointerId,
             liftedPointerId = liftedPointerId,
         )
@@ -65,16 +55,14 @@ object MotionEventParser {
         event: MotionEvent,
         pointerIndex: Int,
         timeMs: Long,
-        historyIndex: Int = -1,
-        historical: Boolean = historyIndex >= 0,
     ): RawTouchContact {
-        val x = if (historical) event.getHistoricalX(pointerIndex, historyIndex) else event.getX(pointerIndex)
-        val y = if (historical) event.getHistoricalY(pointerIndex, historyIndex) else event.getY(pointerIndex)
-        val pressure = if (historical) event.getHistoricalPressure(pointerIndex, historyIndex) else event.getPressure(pointerIndex)
-        val size = if (historical) event.getHistoricalSize(pointerIndex, historyIndex) else event.getSize(pointerIndex)
-        val major = if (historical) event.getHistoricalToolMajor(pointerIndex, historyIndex) else event.getToolMajor(pointerIndex)
-        val minor = if (historical) event.getHistoricalToolMinor(pointerIndex, historyIndex) else event.getToolMinor(pointerIndex)
-        val orientation = if (historical) event.getHistoricalOrientation(pointerIndex, historyIndex) else event.getOrientation(pointerIndex)
+        val x = event.getX(pointerIndex)
+        val y = event.getY(pointerIndex)
+        val pressure = event.getPressure(pointerIndex)
+        val size = event.getSize(pointerIndex)
+        val major = event.getToolMajor(pointerIndex)
+        val minor = event.getToolMinor(pointerIndex)
+        val orientation = event.getOrientation(pointerIndex)
 
         return RawTouchContact(
             pointerId = event.getPointerId(pointerIndex),
@@ -88,7 +76,6 @@ object MotionEventParser {
             toolTypeRaw = event.getToolType(pointerIndex),
             eventTimeNanos = timeMs * 1_000_000L,
             downTimeNanos = event.downTime * 1_000_000L,
-            isHistorical = historical,
         )
     }
 }

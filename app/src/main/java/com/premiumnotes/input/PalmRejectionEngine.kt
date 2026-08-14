@@ -13,21 +13,38 @@ import kotlin.math.hypot
  */
 class PalmRejectionEngine(
     private val capabilities: InputCapabilities,
-    private val settings: PalmRejectionSettings,
-    private val classifier: PalmClassifier = PalmClassifier(settings),
-    private val lock: WritingLock = WritingLock(settings.writingHoldoffMs),
+    private val settingsProvider: () -> PalmRejectionSettings,
 ) {
     private val normalizer = InputNormalizer(capabilities)
     private val pointerStates = HashMap<Int, PointerMotionState>()
+
+    // Mutable references that are recreated only when settings actually change.
+    private var currentSettings: PalmRejectionSettings = settingsProvider()
+    private var classifier = PalmClassifier(currentSettings)
+    private var lock = WritingLock(currentSettings.writingHoldoffMs)
+    private var lastKnownHoldoffMs = currentSettings.writingHoldoffMs
 
     fun reset() {
         lock.reset(System.nanoTime())
         pointerStates.clear()
     }
 
+    /** Recreates derived state only when the settings instance actually changes. */
+    private fun refreshIfSettingsChanged() {
+        val settings = settingsProvider()
+        if (settings !== currentSettings) {
+            currentSettings = settings
+            if (settings.writingHoldoffMs != lastKnownHoldoffMs) {
+                lock = WritingLock(settings.writingHoldoffMs)
+                lastKnownHoldoffMs = settings.writingHoldoffMs
+            }
+            classifier = PalmClassifier(settings)
+        }
+    }
+
     fun process(frame: InputFrame): ClassifiedFrame {
+        refreshIfSettingsChanged()
         val nowNanos = frame.eventTimeNanos
-        val ctx = buildContext(frame, nowNanos)
 
         val classified = mutableListOf<ClassifiedContact>()
         for (raw in frame.contacts) {
@@ -36,7 +53,7 @@ class PalmRejectionEngine(
             val result = classifier.classify(
                 contact,
                 PalmClassifier.ClassifyContext(
-                    mode = settings.mode,
+                    mode = currentSettings.mode,
                     pointerCount = frame.pointerCount,
                     activeWritingPointerId = lock.activePointerId,
                     writingLockActive = lock.isActive,
@@ -65,14 +82,6 @@ class PalmRejectionEngine(
             gesturePointerIds = gestureIds,
         )
     }
-
-    private fun buildContext(frame: InputFrame, nowNanos: Long): PalmClassifier.ClassifyContext =
-        PalmClassifier.ClassifyContext(
-            mode = settings.mode,
-            pointerCount = frame.pointerCount,
-            activeWritingPointerId = lock.activePointerId,
-            writingLockActive = lock.isActive,
-        )
 
     private fun manageWritingLock(
         frame: InputFrame,
@@ -136,8 +145,8 @@ class PalmRejectionEngine(
 
         // Defensive: never leave a stale lock for a pointer no longer present.
         if (lock.activePointerId != null) {
-            val stillDown = frame.contacts.map { it.pointerId }.toSet()
-            if (lock.activePointerId !in stillDown) {
+            val activeId = lock.activePointerId
+            if (frame.contacts.none { it.pointerId == activeId }) {
                 lock.reset(nowNanos)
             }
         }

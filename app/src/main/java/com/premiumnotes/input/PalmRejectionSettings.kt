@@ -1,7 +1,5 @@
 package com.premiumnotes.input
 
-import kotlin.math.abs
-
 /** Stored calibration measurements from the diagnostics screen. */
 data class CalibrationData(
     val fingerMaxDimMm: Float? = null,
@@ -17,7 +15,7 @@ data class CalibrationData(
  * The defaults are calibrated for a 10" tablet: a fingertip contact is roughly 8–12 mm,
  * a resting palm 25–60 mm, a stylus/fingernail pen 4–8 mm.
  */
-class PalmRejectionSettings(
+data class PalmRejectionSettings(
     var mode: PalmRejectionMode = PalmRejectionMode.WRITING,
     /** 0..1; higher = more aggressive palm rejection (smaller accepted contact). */
     var sensitivity: Float = 0.5f,
@@ -48,14 +46,4 @@ class PalmRejectionSettings(
 
     fun effectiveRelaxedPalmMm(): Float =
         calibration.palmMaxDimMm ?: relaxedPalmMm
-
-    fun normalizedSensitivity(): Float = sensitivity.coerceIn(0f, 1f)
-
-    companion object {
-        fun clampMode(v: PalmRejectionMode): PalmRejectionMode =
-            v
-
-        fun distanceMm(ax: Float, ay: Float, bx: Float, by: Float): Float =
-            abs(kotlin.math.hypot(ax - bx, ay - by))
-    }
 }

@@ -12,6 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
@@ -20,17 +22,21 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
+import com.premiumnotes.data.SettingsRepository
 import com.premiumnotes.input.ClassifiedFrame
 import com.premiumnotes.input.ContactClassification
 import com.premiumnotes.input.InputCapabilities
@@ -38,10 +44,7 @@ import com.premiumnotes.input.InputFrame
 import com.premiumnotes.input.PalmRejectionEngine
 import com.premiumnotes.input.PalmRejectionMode
 import com.premiumnotes.input.PalmRejectionSettings
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import kotlinx.coroutines.launch
 
 /**
  * PALM REJECTION TEST / CALIBRATION screen (requirement 41).
@@ -54,11 +57,13 @@ import androidx.compose.material3.IconButton
 fun DiagnosticsScreen(
     engine: PalmRejectionEngine,
     capabilities: InputCapabilities,
-    settings: PalmRejectionSettings,
+    settingsRepository: SettingsRepository,
     onBack: () -> Unit,
 ) {
     var frame by remember { mutableStateOf<ClassifiedFrame?>(null) }
     var inputFrame by remember { mutableStateOf<InputFrame?>(null) }
+    val settings by settingsRepository.settingsFlow.collectAsState(initial = PalmRejectionSettings())
+    val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
@@ -81,7 +86,7 @@ fun DiagnosticsScreen(
                 modes.forEachIndexed { index, mode ->
                     SegmentedButton(
                         selected = settings.mode == mode,
-                        onClick = { settings.mode = mode },
+                        onClick = { scope.launch { settingsRepository.updateSettings { this.mode = mode } } },
                         shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
                     ) {
                         Text(mode.name)
@@ -153,7 +158,7 @@ fun DiagnosticsScreen(
                     }?.contact?.maxDimMm
                     Button(
                         enabled = penDim != null && penDim!! > 0f,
-                        onClick = { settings.calibration = settings.calibration.copy(penMaxDimMm = penDim) }
+                        onClick = { scope.launch { settingsRepository.updateSettings { this.calibration = this.calibration.copy(penMaxDimMm = penDim) } } }
                     ) { Text("Save pen size ${penDim?.let { "%.1f mm".format(it) } ?: ""}") }
 
                     val fingerDim = contacts.firstOrNull {
@@ -161,7 +166,7 @@ fun DiagnosticsScreen(
                     }?.contact?.maxDimMm
                     OutlinedButton(
                         enabled = fingerDim != null && fingerDim!! > 0f,
-                        onClick = { settings.calibration = settings.calibration.copy(fingerMaxDimMm = fingerDim) }
+                        onClick = { scope.launch { settingsRepository.updateSettings { this.calibration = this.calibration.copy(fingerMaxDimMm = fingerDim) } } }
                     ) { Text("Save finger ${fingerDim?.let { "%.1f".format(it) } ?: ""}") }
 
                     val palmDim = contacts.firstOrNull {
@@ -169,7 +174,7 @@ fun DiagnosticsScreen(
                     }?.contact?.maxDimMm
                     OutlinedButton(
                         enabled = palmDim != null && palmDim!! > 0f,
-                        onClick = { settings.calibration = settings.calibration.copy(palmMaxDimMm = palmDim) }
+                        onClick = { scope.launch { settingsRepository.updateSettings { this.calibration = this.calibration.copy(palmMaxDimMm = palmDim) } } }
                     ) { Text("Save palm ${palmDim?.let { "%.1f".format(it) } ?: ""}") }
                 }
 

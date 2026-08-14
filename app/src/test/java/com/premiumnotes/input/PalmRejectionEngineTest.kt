@@ -13,7 +13,7 @@ import org.junit.Test
 class PalmRejectionEngineTest {
 
     private fun engine(mode: PalmRejectionMode = PalmRejectionMode.WRITING) =
-        PalmRejectionEngine(testCapabilities(), testSettings(mode))
+        PalmRejectionEngine(testCapabilities()) { testSettings(mode) }
 
     @Test
     fun smallPenDownBecomesActiveWritingPointer() {

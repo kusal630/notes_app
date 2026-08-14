@@ -59,7 +59,6 @@ data class RawTouchContact(
     val toolTypeRaw: Int,
     val eventTimeNanos: Long,
     val downTimeNanos: Long,
-    val isHistorical: Boolean = false,
 )
 
 /**
@@ -160,9 +159,6 @@ data class ClassifiedFrame(
     val activeWritingPointerId: Int?,
     val gesturePointerIds: List<Int>,
 ) {
-    fun writingContacts(): List<ClassifiedContact> =
-        contacts.filter { it.classification == ContactClassification.WRITING }
-
     fun contactFor(pointerId: Int): ClassifiedContact? =
         contacts.firstOrNull { it.contact.pointerId == pointerId }
 }

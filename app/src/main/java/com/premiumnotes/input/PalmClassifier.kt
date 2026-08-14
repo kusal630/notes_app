@@ -24,7 +24,6 @@ class PalmClassifier(
         val writingLockActive: Boolean = false,
         val contactSpeedMmPerSec: Float = 0f,
         val contactDurationMs: Long = 0L,
-        val distanceToActiveWritingMm: Float? = null,
     )
 
     fun classify(contact: NormalizedContact, ctx: ClassifyContext): ClassificationResult {
