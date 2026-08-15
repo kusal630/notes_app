@@ -4,6 +4,9 @@ import android.graphics.RectF
 import com.premiumnotes.model.PageContent
 import com.premiumnotes.model.PenStyle
 import com.premiumnotes.model.PenType
+import com.premiumnotes.model.Point
+import com.premiumnotes.model.ShapeKind
+import com.premiumnotes.model.ShapeObject
 import com.premiumnotes.model.Stroke
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -106,6 +109,31 @@ class NoteEditorStateTest {
         assertEquals(0, s.content.value.strokes.size)
         s.undo()
         assertEquals(1, s.content.value.strokes.size)
+    }
+
+    @Test
+    fun addShapeIsUndoableAndRedoable() {
+        val s = state()
+        s.addShape(
+            ShapeObject(
+                id = 7,
+                kind = ShapeKind.RECT,
+                x = 0f,
+                y = 0f,
+                points = listOf(Point(0f, 0f), Point(10f, 10f)),
+                strokeWidthMm = 1.5f,
+                colorArgb = 0xFFE53935,
+            )
+        )
+        assertEquals(1, s.content.value.shapeObjects.size)
+        assertEquals(ShapeKind.RECT, s.content.value.shapeObjects.single().kind)
+
+        s.undo()
+        assertEquals(0, s.content.value.shapeObjects.size)
+
+        s.redo()
+        assertEquals(1, s.content.value.shapeObjects.size)
+        assertEquals(7L, s.content.value.shapeObjects.single().id)
     }
 
     @Test

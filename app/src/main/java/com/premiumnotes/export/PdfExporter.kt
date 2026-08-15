@@ -6,9 +6,11 @@ import android.graphics.RectF
 import com.premiumnotes.model.PageBackground
 import com.premiumnotes.model.PageContent
 import com.premiumnotes.model.PenType
+import com.premiumnotes.model.ShapeObject
 import com.premiumnotes.model.Stroke
 import com.premiumnotes.render.InkRenderer
 import com.premiumnotes.render.PageBackgroundRenderer
+import com.premiumnotes.render.ShapeRenderer
 import java.io.File
 
 /**
@@ -70,6 +72,9 @@ object PdfExporter {
                 }
                 val renderer = InkRenderer()
                 for (stroke in highlighters) renderer.drawStroke(canvas, stroke, 1f)
+                for (shape in content.shapeObjects) {
+                    canvas.drawPath(ShapeRenderer.buildPath(shape), ShapeRenderer.outlinePaint(shape))
+                }
                 for (stroke in ink) renderer.drawStroke(canvas, stroke, 1f)
 
                 canvas.restore()
@@ -99,6 +104,23 @@ object PdfExporter {
                     rect.union(pts[i], pts[i + 1])
                 }
                 i += 2
+            }
+        }
+        for (shape in content.shapeObjects) {
+            val a = shape.points.getOrNull(0)
+            val b = shape.points.getOrNull(1)
+            if (a != null && b != null) {
+                val left = kotlin.math.min(a.x, b.x)
+                val top = kotlin.math.min(a.y, b.y)
+                val right = kotlin.math.max(a.x, b.x)
+                val bottom = kotlin.math.max(a.y, b.y)
+                if (!set) {
+                    rect.set(left, top, right, bottom)
+                    set = true
+                } else {
+                    rect.union(left, top)
+                    rect.union(right, bottom)
+                }
             }
         }
         if (!set) {

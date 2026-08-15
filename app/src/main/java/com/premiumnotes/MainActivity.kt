@@ -155,6 +155,7 @@ fun SettingsScreen(
                         this.palmProximityMm = newSettings.palmProximityMm
                         this.smoothing = newSettings.smoothing
                         this.enableFingerWriting = newSettings.enableFingerWriting
+                        this.autoConvertHandwritingToText = newSettings.autoConvertHandwritingToText
                     }
                 }
             })
@@ -189,6 +190,28 @@ fun SettingsContent(
             Switch(
                 checked = settings.enableFingerWriting,
                 onCheckedChange = { onSettingChange(settings.copy(enableFingerWriting = it)) },
+            )
+        }
+
+        SettingsSectionDivider()
+        SettingsSectionTitle("Handwriting")
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Auto-convert handwriting to text", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "When on, finished strokes are automatically converted to typed text. " +
+                        "Recognition is not implemented yet, so this switch currently has no effect.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = settings.autoConvertHandwritingToText,
+                onCheckedChange = { onSettingChange(settings.copy(autoConvertHandwritingToText = it)) },
             )
         }
 

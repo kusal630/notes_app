@@ -39,6 +39,22 @@ class InkRenderer {
         }
     }
 
+    /**
+     * Builds the cached render geometry for a committed stroke in world units (widths in
+     * millimeters). The canvas scales the whole path via the viewport transform, so the
+     * cached path is scale-independent and renders identically at any zoom — the same
+     * path the live stroke produces, which is what makes committed ink match the
+     * in-progress stroke exactly ("paper" feel).
+     */
+    fun buildRenderPath(stroke: Stroke): RenderPath = when (stroke.style.type) {
+        PenType.FOUNTAIN -> RenderPath(variableWidthPolygon(stroke, fountainWidth(stroke), 1f), fill = true)
+        PenType.CALLIGRAPHY -> RenderPath(variableWidthPolygon(stroke, calligraphyWidth(stroke), 1f), fill = true)
+        else -> RenderPath(buildPath(stroke), fill = false)
+    }
+
+    /** The fill/plain render shape produced by [buildRenderPath]. */
+    class RenderPath(val path: Path, val fill: Boolean)
+
     /** Builds a plain stroked Path from a stroke's packed points. */
     fun buildPath(stroke: Stroke): Path {
         val path = Path()
@@ -125,12 +141,26 @@ class InkRenderer {
         widthAt: (Int, FloatArray, Int) -> Float,
     ) {
         val pts = stroke.pointsPacked
-        val n = pts.size / 2
-        if (n < 2) return
+        if (pts.size / 2 < 2) return
         val paint = Paint(paintFor(stroke.style)).apply {
             style = Paint.Style.FILL
         }
+        canvas.drawPath(variableWidthPolygon(stroke, widthAt, scalePxPerMm), paint)
+    }
+
+    /**
+     * Builds the filled polygon for a variable-width stroke. The round caps are baked in
+     * as closed circle subpaths so a single cached path renders the whole stroke.
+     */
+    private fun variableWidthPolygon(
+        stroke: Stroke,
+        widthAt: (Int, FloatArray, Int) -> Float,
+        scalePxPerMm: Float,
+    ): Path {
+        val pts = stroke.pointsPacked
+        val n = pts.size / 2
         val path = Path()
+        if (n < 2) return path
         val leftX = FloatArray(n)
         val leftY = FloatArray(n)
         val rightX = FloatArray(n)
@@ -158,15 +188,13 @@ class InkRenderer {
         for (i in 1 until n) path.lineTo(leftX[i], leftY[i])
         for (i in n - 1 downTo 0) path.lineTo(rightX[i], rightY[i])
         path.close()
-        canvas.drawPath(path, paint)
 
         // Round caps at both ends for a natural look.
-        if (n > 1) {
-            val capRadius = widthAt(0, pts, n) * scalePxPerMm / 2f
-            canvas.drawCircle(pts[0], pts[1], capRadius.coerceAtLeast(0.2f), paint)
-            val lastW = widthAt(n - 1, pts, n) * scalePxPerMm / 2f
-            canvas.drawCircle(pts[pts.size - 2], pts[pts.size - 1], lastW.coerceAtLeast(0.2f), paint)
-        }
+        val capRadius = widthAt(0, pts, n) * scalePxPerMm / 2f
+        path.addCircle(pts[0], pts[1], capRadius.coerceAtLeast(0.2f), Path.Direction.CW)
+        val lastW = widthAt(n - 1, pts, n) * scalePxPerMm / 2f
+        path.addCircle(pts[pts.size - 2], pts[pts.size - 1], lastW.coerceAtLeast(0.2f), Path.Direction.CW)
+        return path
     }
 
     private fun drawPencil(canvas: Canvas, stroke: Stroke, scalePxPerMm: Float, base: Paint) {

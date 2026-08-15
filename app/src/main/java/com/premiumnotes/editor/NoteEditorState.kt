@@ -4,6 +4,8 @@ import com.premiumnotes.model.PageContent
 import com.premiumnotes.model.PenStyle
 import com.premiumnotes.model.PenType
 import com.premiumnotes.model.Point
+import com.premiumnotes.model.ShapeKind
+import com.premiumnotes.model.ShapeObject
 import com.premiumnotes.model.Stroke
 import android.graphics.RectF
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,7 +15,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** Active editor tool. */
 enum class Tool {
-    PEN, HIGHLIGHTER, ERASER, SELECT, TEXT, IMAGE
+    PEN, HIGHLIGHTER, ERASER, SELECT, SHAPES, TEXT, IMAGE
 }
 
 /**
@@ -38,6 +40,9 @@ class NoteEditorState(
 
     private val _eraserSizeMm = MutableStateFlow(6f)
     val eraserSizeMm: StateFlow<Float> = _eraserSizeMm.asStateFlow()
+
+    private val _shapeKind = MutableStateFlow(ShapeKind.RECT)
+    val shapeKind: StateFlow<ShapeKind> = _shapeKind.asStateFlow()
 
     private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
     val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
@@ -67,6 +72,15 @@ class NoteEditorState(
 
     fun setEraserSize(sizeMm: Float) {
         _eraserSizeMm.value = sizeMm
+    }
+
+    fun setShapeKind(kind: ShapeKind) {
+        _shapeKind.value = kind
+    }
+
+    /** Adds a placed geometric shape (undoable). */
+    fun addShape(shape: ShapeObject) {
+        apply(AddShapeCommand(shape))
     }
 
     fun nextId(): Long = ids.incrementAndGet()

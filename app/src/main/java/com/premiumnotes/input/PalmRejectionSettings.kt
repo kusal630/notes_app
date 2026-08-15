@@ -40,6 +40,11 @@ data class PalmRejectionSettings(
      * and the writing lock still rejects any additional (palm) contact.
      */
     var enableFingerWriting: Boolean = true,
+    /**
+     * When on, finished handwriting strokes are automatically converted to typed text.
+     * Recognition is not implemented yet, so this switch currently has no effect.
+     */
+    var autoConvertHandwritingToText: Boolean = false,
 ) {
     /** Applies user calibration and sensitivity to yield the effective writing cutoff. */
     fun effectiveWritingMaxMm(): Float {

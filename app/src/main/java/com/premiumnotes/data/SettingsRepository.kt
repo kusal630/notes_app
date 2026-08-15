@@ -42,6 +42,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val PALM_PROXIMITY_MM_KEY = floatPreferencesKey("palm_proximity_mm")
         private val SMOOTHING_KEY = intPreferencesKey("smoothing")
         private val FINGER_WRITING_KEY = booleanPreferencesKey("finger_writing")
+        private val AUTO_CONVERT_HANDWRITING_KEY = booleanPreferencesKey("auto_convert_handwriting")
         private val CALIBRATION_FINGER_KEY = floatPreferencesKey("calibration_finger")
         private val CALIBRATION_PEN_KEY = floatPreferencesKey("calibration_pen")
         private val CALIBRATION_PALM_KEY = floatPreferencesKey("calibration_palm")
@@ -65,6 +66,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             prefs[PALM_PROXIMITY_MM_KEY] = current.palmProximityMm
             prefs[SMOOTHING_KEY] = current.smoothing.ordinal
             prefs[FINGER_WRITING_KEY] = current.enableFingerWriting
+            prefs[AUTO_CONVERT_HANDWRITING_KEY] = current.autoConvertHandwritingToText
             current.calibration.fingerMaxDimMm?.let { prefs[CALIBRATION_FINGER_KEY] = it }
             current.calibration.penMaxDimMm?.let { prefs[CALIBRATION_PEN_KEY] = it }
             current.calibration.palmMaxDimMm?.let { prefs[CALIBRATION_PALM_KEY] = it }
@@ -93,5 +95,6 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             smoothing = SmoothingMode.entries.getOrNull(prefs[SMOOTHING_KEY] ?: SmoothingMode.MEDIUM.ordinal)
                 ?: SmoothingMode.MEDIUM,
             enableFingerWriting = prefs[FINGER_WRITING_KEY] ?: true,
+            autoConvertHandwritingToText = prefs[AUTO_CONVERT_HANDWRITING_KEY] ?: false,
         )
 }

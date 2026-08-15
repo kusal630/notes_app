@@ -1,6 +1,7 @@
 package com.premiumnotes.editor
 
 import com.premiumnotes.model.PageContent
+import com.premiumnotes.model.ShapeObject
 import com.premiumnotes.model.Stroke
 
 /**
@@ -44,6 +45,20 @@ class AddStrokesCommand(val strokes: List<Stroke>) : EditorCommand {
         content.copy(strokes = content.strokes + strokes)
 
     override fun invert() = RemoveStrokesCommand(strokes)
+}
+
+class AddShapeCommand(val shape: ShapeObject) : EditorCommand {
+    override fun apply(content: PageContent) =
+        content.copy(shapeObjects = content.shapeObjects + shape)
+
+    override fun invert() = RemoveShapeCommand(shape)
+}
+
+class RemoveShapeCommand(val shape: ShapeObject) : EditorCommand {
+    override fun apply(content: PageContent) =
+        content.copy(shapeObjects = content.shapeObjects.filterNot { it.id == shape.id })
+
+    override fun invert() = AddShapeCommand(shape)
 }
 
 /**

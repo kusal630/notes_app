@@ -1,7 +1,6 @@
 package com.premiumnotes.ui.editor
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
@@ -19,9 +18,12 @@ import com.premiumnotes.input.PalmRejectionEngine
 import com.premiumnotes.model.PageBackground
 import com.premiumnotes.model.PenStyle
 import com.premiumnotes.model.Point
+import com.premiumnotes.model.ShapeKind
+import com.premiumnotes.model.ShapeObject
 import com.premiumnotes.model.Stroke
 import com.premiumnotes.render.InkRenderer
 import com.premiumnotes.render.PageBackgroundRenderer
+import com.premiumnotes.render.ShapeRenderer
 import kotlin.math.hypot
 
 /**
@@ -33,8 +35,13 @@ import kotlin.math.hypot
  * Responsibilities:
  *  - Route every MotionEvent through the palm rejection pipeline.
  *  - Drive the active stroke from the locked writing pointer (smoothed, dead-zoned).
- *  - Draw committed strokes from a cached bitmap layer (rebuilt only on change), and
- *    the active stroke live on top — no full-page redraw per touch event.
+ *  - Draw committed content (strokes + shapes) from a cached display list. The cached
+ *    list only holds geometry (paths/paints), rebuilt when content changes, so the
+ *    canvas renders every stroke/shape every frame under the viewport transform — the
+ *    whole page is always present like paper, no bitmap layer to go stale while
+ *    scrolling.
+ *  - Render the in-progress stroke through the same renderer as committed strokes so
+ *    the live stroke looks exactly like the final one (no thickness jump on commit).
  *  - Handle two-finger pan/zoom without letting a resting palm trigger gestures.
  */
 class InkCanvasView @JvmOverloads constructor(
@@ -44,6 +51,7 @@ class InkCanvasView @JvmOverloads constructor(
 
     interface Listener {
         fun onStrokeCommitted(stroke: Stroke)
+        fun onShapeCommitted(shape: ShapeObject)
         fun onEraseGestureBegin()
         fun onEraseAt(x: Float, y: Float, radiusMm: Float)
         fun onEraseAlong(x1: Float, y1: Float, x2: Float, y2: Float, radiusMm: Float)
@@ -66,10 +74,21 @@ class InkCanvasView @JvmOverloads constructor(
                 val pureAppend = value.size == field.size + 1 && value.dropLast(1) == field
                 field = value
                 strokesVersion++
-                if (!pureAppend) rebuildPending = true
+                if (pureAppend) appendStrokeGeometry(value.last()) else rebuildStrokeGeometry()
                 if (value.isNotEmpty()) {
                     strokeIdCounter = maxOf(strokeIdCounter, value.maxOf { it.id })
                 }
+                invalidate()
+            }
+        }
+
+    var shapes: List<ShapeObject> = emptyList()
+        set(value) {
+            if (field !== value) {
+                val pureAppend = value.size == field.size + 1 && value.dropLast(1) == field
+                field = value
+                shapesVersion++
+                if (pureAppend) appendShapeGeometry(value.last()) else rebuildShapeGeometry()
                 invalidate()
             }
         }
@@ -79,6 +98,7 @@ class InkCanvasView @JvmOverloads constructor(
     var penStyle: PenStyle = PenStyle()
     var tool: Tool = Tool.PEN
     var eraserSizeMm: Float = 6f
+    var shapeKind: ShapeKind = ShapeKind.RECT
 
     /** World-space bounding box of the current selection, set by the UI. */
     var selectionBoundsMm: RectF? = null
@@ -100,6 +120,10 @@ class InkCanvasView @JvmOverloads constructor(
     private var lassoCurrentWorld = Point(0f, 0f)
     private var dragAnchorWorld = Point(0f, 0f)
 
+    // Reused scratch objects so the steady-state draw path allocates nothing per frame.
+    private val worldClipRect = RectF()
+    private val lassoScreenRect = RectF()
+
     private val selectionPaint = Paint().apply {
         style = Paint.Style.STROKE
         strokeWidth = 2f
@@ -119,25 +143,26 @@ class InkCanvasView @JvmOverloads constructor(
 
     // --- active stroke ---
     private var strokeBuilder: StrokeBuilder? = null
-    private var activePath = Path()
-    private val activePaint = Paint().apply {
-        isAntiAlias = true
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
 
-    // --- committed layer cache ---
-    private var committedLayer: Bitmap? = null
-    private var layerScale = 0f
-    private var layerOffsetX = 0f
-    private var layerOffsetY = 0f
+    // --- committed content display list ---
+    // Only geometry is cached (paths + paints); onDraw draws every committed stroke and
+    // shape under the viewport transform, so nothing goes stale while the page scrolls.
+    private data class CachedStroke(
+        val type: com.premiumnotes.model.PenType,
+        val path: Path,
+        val paint: Paint,
+        val pencil: Boolean,
+        val grainAlpha: Int,
+        val grainDx: Float,
+        val grainDy: Float,
+    )
+
+    private data class CachedShape(val path: Path, val paint: Paint)
+
+    private var displayStrokes: List<CachedStroke> = emptyList()
+    private var displayShapes: List<CachedShape> = emptyList()
     private var strokesVersion = 0
-    private var rebuildPending = true
-    /** Number of strokes already baked into the cached layer. */
-    private var renderedCount = 0
-    /** [strokesVersion] at the time the cached layer was last written. */
-    private var renderedVersion = -1
+    private var shapesVersion = 0
 
     // --- gesture state ---
     private data class GestureStart(
@@ -158,12 +183,6 @@ class InkCanvasView @JvmOverloads constructor(
     fun screenToWorldX(sx: Float) = (sx - offsetX) / scale
     fun screenToWorldY(sy: Float) = (sy - offsetY) / scale
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        committedLayer = null
-        rebuildPending = true
-    }
-
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val input = MotionEventParser.parse(event)
         val classified = engine.process(input)
@@ -181,6 +200,7 @@ class InkCanvasView @JvmOverloads constructor(
             tool == Tool.ERASER -> handleEraser(input, classified)
             tool == Tool.PEN || tool == Tool.HIGHLIGHTER -> handleStroke(input, classified)
             tool == Tool.SELECT -> handleSelection(input, classified)
+            tool == Tool.SHAPES -> handleShapes(input, classified)
             else -> handleNavigation(input, classified)
         }
         return true
@@ -218,7 +238,6 @@ class InkCanvasView @JvmOverloads constructor(
                         val stroke = b.onUp(endX, endY, endT)
                         if (stroke != null) {
                             listener?.onStrokeCommitted(stroke)
-                            activePath.reset()
                         }
                         invalidate()
                     }
@@ -229,7 +248,6 @@ class InkCanvasView @JvmOverloads constructor(
                 strokeBuilder?.onCancel()
                 strokeBuilder = null
                 writingPointerId = -1
-                activePath.reset()
                 invalidate()
             }
 
@@ -285,7 +303,6 @@ class InkCanvasView @JvmOverloads constructor(
                             changed = true
                         }
                         if (changed) {
-                            rebuildActivePath()
                             invalidate()
                         }
                     }
@@ -310,14 +327,62 @@ class InkCanvasView @JvmOverloads constructor(
         writingPointerId = -1
         val last = builder.livePoints.lastOrNull()
         if (last == null) {
-            activePath.reset()
             invalidate()
             return
         }
         val stroke = builder.onUp(last.x, last.y, 0L)
         if (stroke != null) listener?.onStrokeCommitted(stroke)
-        activePath.reset()
         invalidate()
+    }
+
+    // --- shapes ---
+
+    private var shapeStartWorld: Point? = null
+    private var shapeCurrentWorld: Point? = null
+
+    private fun handleShapes(input: InputFrame, classified: ClassifiedFrame) {
+        val contact = primaryContact(classified) ?: return
+        when (input.action) {
+            com.premiumnotes.input.InputAction.DOWN,
+            com.premiumnotes.input.InputAction.POINTER_DOWN,
+            -> {
+                shapeStartWorld = Point(screenToWorldX(contact.contact.x), screenToWorldY(contact.contact.y))
+                shapeCurrentWorld = shapeStartWorld
+                invalidate()
+            }
+
+            com.premiumnotes.input.InputAction.MOVE -> {
+                if (shapeStartWorld != null) {
+                    shapeCurrentWorld = Point(screenToWorldX(contact.contact.x), screenToWorldY(contact.contact.y))
+                    invalidate()
+                }
+            }
+
+            com.premiumnotes.input.InputAction.UP,
+            com.premiumnotes.input.InputAction.POINTER_UP,
+            com.premiumnotes.input.InputAction.CANCEL,
+            -> {
+                val start = shapeStartWorld ?: run { shapeCurrentWorld = null; return }
+                val current = shapeCurrentWorld ?: start
+                shapeStartWorld = null
+                shapeCurrentWorld = null
+                val size = hypot(current.x - start.x, current.y - start.y)
+                if (size >= 2f) {
+                    listener?.onShapeCommitted(
+                        ShapeObject(
+                            id = nextStrokeId(),
+                            kind = shapeKind,
+                            points = listOf(start, current),
+                            x = start.x,
+                            y = start.y,
+                            strokeWidthMm = penStyle.widthMm,
+                            colorArgb = penStyle.colorArgb,
+                        )
+                    )
+                }
+                invalidate()
+            }
+        }
     }
 
     // --- selection ---
@@ -505,7 +570,6 @@ class InkCanvasView @JvmOverloads constructor(
             com.premiumnotes.input.InputAction.POINTER_UP,
             -> {
                 gesture = null
-                rebuildPending = true
                 invalidate()
             }
             else -> Unit
@@ -514,64 +578,64 @@ class InkCanvasView @JvmOverloads constructor(
 
     // --- rendering ---
 
-    private fun rebuildActivePath() {
-        activePath.reset()
-        val builder = strokeBuilder ?: return
-        val pts = builder.livePoints
-        if (pts.isEmpty()) return
-        activePath.moveTo(pts[0].x, pts[0].y)
-        for (i in 1 until pts.size) activePath.lineTo(pts[i].x, pts[i].y)
-
-        activePaint.color = (penStyle.colorArgb and 0xFFFFFF).toInt() or
-            ((penStyle.opacity.coerceIn(0f, 1f) * 255).toInt() shl 24)
-        // Stroke width in world units (mm); the canvas transform converts it to pixels.
-        activePaint.strokeWidth = penStyle.widthMm.coerceAtLeast(0.2f)
+    /** Builds cached render geometry for one committed stroke (world units). */
+    private fun buildStrokeGeometry(stroke: Stroke): CachedStroke {
+        val rp = renderer.buildRenderPath(stroke)
+        val paint = if (rp.fill) {
+            Paint(renderer.paintFor(stroke.style)).apply { style = Paint.Style.FILL }
+        } else {
+            renderer.paintFor(stroke.style).apply {
+                strokeWidth = stroke.style.widthMm.coerceAtLeast(0.2f)
+            }
+        }
+        val pencil = stroke.style.type == com.premiumnotes.model.PenType.PENCIL
+        val grainAlpha = if (pencil) (paint.alpha * 0.5f).toInt() else 0
+        val seed = (stroke.id * 7919L).toInt()
+        val grainDx = 0.06f + (seed and 0x1F) * 0.002f
+        return CachedStroke(
+            type = stroke.style.type,
+            path = rp.path,
+            paint = paint,
+            pencil = pencil,
+            grainAlpha = grainAlpha,
+            grainDx = grainDx,
+            grainDy = grainDx * 0.5f,
+        )
     }
 
-    private fun rebuildCommittedLayer() {
-        val w = width.coerceAtLeast(1)
-        val h = height.coerceAtLeast(1)
-        val bmp = committedLayer
-        if (bmp == null || bmp.width != w || bmp.height != h) {
-            committedLayer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            renderedCount = 0
-        }
-        val layer = committedLayer ?: return
-        val c = Canvas(layer)
-        c.save()
-        c.translate(offsetX, offsetY)
-        c.scale(scale, scale)
+    private fun appendStrokeGeometry(stroke: Stroke) {
+        displayStrokes = displayStrokes + buildStrokeGeometry(stroke)
+    }
 
-        // Fast path: viewport transform unchanged and exactly one ink stroke appended
-        // since the layer was last written. Ink always draws above highlighters, so
-        // appending ink directly is correct; anything else forces a full z-ordered pass.
-        val transformUnchanged = scale == layerScale && offsetX == layerOffsetX && offsetY == layerOffsetY
-        val singleAppend = !rebuildPending && transformUnchanged &&
-            strokes.size == renderedCount + 1 && strokesVersion == renderedVersion + 1 &&
-            strokes.last().style.type != com.premiumnotes.model.PenType.HIGHLIGHTER
-        if (singleAppend) {
-            renderer.drawStroke(c, strokes.last(), 1f)
-        } else {
-            layer.eraseColor(0x00000000)
-            // Z-order: highlighters always render below ink so a later highlight never
-            // obscures handwriting (matches paper behavior). Both passes keep their
-            // relative chronological order.
-            val highlighters = ArrayList<Stroke>()
-            val ink = ArrayList<Stroke>()
-            for (stroke in strokes) {
-                if (stroke.style.type == com.premiumnotes.model.PenType.HIGHLIGHTER) highlighters += stroke
-                else ink += stroke
-            }
-            for (stroke in highlighters) renderer.drawStroke(c, stroke, 1f)
-            for (stroke in ink) renderer.drawStroke(c, stroke, 1f)
-        }
-        c.restore()
+    private fun rebuildStrokeGeometry() {
+        val items = ArrayList<CachedStroke>(strokes.size)
+        for (stroke in strokes) items += buildStrokeGeometry(stroke)
+        displayStrokes = items
+    }
 
-        renderedCount = strokes.size
-        renderedVersion = this.strokesVersion
-        layerScale = scale
-        layerOffsetX = offsetX
-        layerOffsetY = offsetY
+    private fun buildShapeGeometry(shape: ShapeObject): CachedShape =
+        CachedShape(ShapeRenderer.buildPath(shape), ShapeRenderer.outlinePaint(shape))
+
+    private fun appendShapeGeometry(shape: ShapeObject) {
+        displayShapes = displayShapes + buildShapeGeometry(shape)
+    }
+
+    private fun rebuildShapeGeometry() {
+        val items = ArrayList<CachedShape>(shapes.size)
+        for (shape in shapes) items += buildShapeGeometry(shape)
+        displayShapes = items
+    }
+
+    private fun drawCommittedStroke(canvas: Canvas, item: CachedStroke) {
+        if (item.pencil) {
+            val grain = Paint(item.paint).apply { alpha = item.grainAlpha }
+            canvas.drawPath(item.path, grain)
+            canvas.save()
+            canvas.translate(item.grainDx, item.grainDy)
+            canvas.drawPath(item.path, grain)
+            canvas.restore()
+        }
+        canvas.drawPath(item.path, item.paint)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -580,85 +644,76 @@ class InkCanvasView @JvmOverloads constructor(
         val w = width.toFloat()
         val h = height.toFloat()
 
-        // Background (world space).
+        // World space: background + committed content + live strokes.
         canvas.save()
         canvas.translate(offsetX, offsetY)
         canvas.scale(scale, scale)
+
         PageBackgroundRenderer.drawBackground(
             canvas,
             background,
             pxPerMm = 1f,
-            worldClip = RectF(
-                -offsetX / scale, -offsetY / scale,
-                (w - offsetX) / scale, (h - offsetY) / scale,
-            ),
+            worldClip = worldClipRect.also {
+                it.set(
+                    -offsetX / scale, -offsetY / scale,
+                    (w - offsetX) / scale, (h - offsetY) / scale,
+                )
+            },
         )
+
+        // Committed content is drawn every frame from the cached display list, so the
+        // whole page is always present at its world position — no bitmap layer to go
+        // stale while scrolling (strokes never "reload" or pop in).
+        // Z-order: highlighters < shapes < ink (matches paper behavior).
+        for (item in displayStrokes) {
+            if (item.type == com.premiumnotes.model.PenType.HIGHLIGHTER) drawCommittedStroke(canvas, item)
+        }
+        for (item in displayShapes) canvas.drawPath(item.path, item.paint)
+        for (item in displayStrokes) {
+            if (item.type != com.premiumnotes.model.PenType.HIGHLIGHTER) drawCommittedStroke(canvas, item)
+        }
+
+        // Live shape preview while dragging.
+        val shapeStart = shapeStartWorld
+        val shapeCurrent = shapeCurrentWorld
+        if (shapeStart != null && shapeCurrent != null) {
+            val preview = ShapeObject(
+                id = -1L,
+                kind = shapeKind,
+                points = listOf(shapeStart, shapeCurrent),
+                x = shapeStart.x,
+                y = shapeStart.y,
+                strokeWidthMm = penStyle.widthMm,
+                colorArgb = penStyle.colorArgb,
+            )
+            canvas.drawPath(ShapeRenderer.buildPath(preview), ShapeRenderer.outlinePaint(preview))
+        }
+
+        // Active stroke: rendered through the same renderer as committed strokes so the
+        // live stroke matches the final one exactly (width, fountain/calligraphy profile,
+        // pencil grain) — no thickness or appearance change on commit.
+        val builder = strokeBuilder
+        if (builder != null && builder.livePoints.size > 1) {
+            val pts = builder.livePoints
+            val live = Stroke(id = 0L, style = penStyle, pointsPacked = Stroke.pack(pts))
+            renderer.drawStroke(canvas, live, 1f)
+        }
         canvas.restore()
 
-        // Committed layer: rebuilt only when strokes change, the view is resized, or the
-        // transform drifts too far; otherwise the cached bitmap is re-projected so
-        // pan/zoom never pay a full redraw per frame.
-        val layer = committedLayer
-        val ratio = if (layerScale > 0f) scale / layerScale else Float.MAX_VALUE
-        val needsRebuild =
-            layer == null ||
-                layer!!.width != width || layer.height != height ||
-                rebuildPending ||
-                renderedVersion != strokesVersion ||
-                kotlin.math.abs(offsetX - layerOffsetX) > w * 0.25f ||
-                kotlin.math.abs(offsetY - layerOffsetY) > h * 0.25f ||
-                ratio < 0.6f || ratio > 1.7f
-        if (needsRebuild) {
-            rebuildCommittedLayer()
-            rebuildPending = false
-        }
-        committedLayer?.let { bmp ->
-            val sf = scale / layerScale
-            if (sf == 1f && offsetX == layerOffsetX && offsetY == layerOffsetY) {
-                canvas.drawBitmap(bmp, 0f, 0f, null)
-            } else {
-                canvas.save()
-                canvas.translate(offsetX - sf * layerOffsetX, offsetY - sf * layerOffsetY)
-                canvas.scale(sf, sf)
-                canvas.drawBitmap(bmp, 0f, 0f, null)
-                canvas.restore()
-            }
-        }
-
-        // Selection bounds highlight.
+        // Screen-space selection overlays.
         selectionBoundsMm?.let { bounds ->
             canvas.drawRect(worldRectToScreen(bounds), selectionPaint)
         }
-
-        // Live lasso while dragging.
         if (selectionMode == SelectionMode.LASSO) {
-            val lasso = worldRectToScreen(
-                RectF(
-                    kotlin.math.min(lassoStartWorld.x, lassoCurrentWorld.x),
-                    kotlin.math.min(lassoStartWorld.y, lassoCurrentWorld.y),
-                    kotlin.math.max(lassoStartWorld.x, lassoCurrentWorld.x),
-                    kotlin.math.max(lassoStartWorld.y, lassoCurrentWorld.y),
-                )
-            )
+            val lasso = lassoScreenRect.also {
+                val lx = kotlin.math.min(lassoStartWorld.x, lassoCurrentWorld.x)
+                val ly = kotlin.math.min(lassoStartWorld.y, lassoCurrentWorld.y)
+                val rx = kotlin.math.max(lassoStartWorld.x, lassoCurrentWorld.x)
+                val ry = kotlin.math.max(lassoStartWorld.y, lassoCurrentWorld.y)
+                it.set(lx * scale + offsetX, ly * scale + offsetY, rx * scale + offsetX, ry * scale + offsetY)
+            }
             canvas.drawRect(lasso, lassoFillPaint)
             canvas.drawRect(lasso, lassoStrokePaint)
         }
-
-        // Active stroke (world coordinates; rendered under the same viewport transform
-        // as the committed layer so the live stroke tracks the pen exactly).
-        val builder = strokeBuilder
-        if (builder != null && builder.livePoints.size > 1) {
-            canvas.save()
-            canvas.translate(offsetX, offsetY)
-            canvas.scale(scale, scale)
-            canvas.drawPath(activePath, activePaint)
-            canvas.restore()
-        }
-    }
-
-    override fun onDetachedFromWindow() {
-        super.onDetachedFromWindow()
-        committedLayer?.recycle()
-        committedLayer = null
     }
 }

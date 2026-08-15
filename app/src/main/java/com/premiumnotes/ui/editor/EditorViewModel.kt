@@ -4,11 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.graphics.RectF
 import com.premiumnotes.data.NotesRepository
+import com.premiumnotes.editor.AddShapeCommand
 import com.premiumnotes.editor.AddStrokeCommand
 import com.premiumnotes.editor.NoteEditorState
 import com.premiumnotes.editor.Tool
 import com.premiumnotes.model.PageContent
 import com.premiumnotes.model.PenStyle
+import com.premiumnotes.model.ShapeKind
+import com.premiumnotes.model.ShapeObject
 import com.premiumnotes.model.Stroke
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -61,6 +64,10 @@ class EditorViewModel(
             _editor.value?.apply(AddStrokeCommand(stroke))
         }
 
+        override fun onShapeCommitted(shape: ShapeObject) {
+            _editor.value?.addShape(shape)
+        }
+
         override fun onEraseGestureBegin() {
             _editor.value?.eraseGestureBegin()
         }
@@ -101,6 +108,7 @@ class EditorViewModel(
     fun setTool(tool: Tool) = _editor.value?.setTool(tool)
     fun setPenStyle(style: PenStyle) = _editor.value?.setPenStyle(style)
     fun setEraserSize(sizeMm: Float) = _editor.value?.setEraserSize(sizeMm)
+    fun setShapeKind(kind: ShapeKind) = _editor.value?.setShapeKind(kind)
     fun undo() = _editor.value?.undo()
     fun redo() = _editor.value?.redo()
 

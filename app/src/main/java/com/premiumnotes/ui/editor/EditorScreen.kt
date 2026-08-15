@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.TextFields
@@ -87,6 +88,7 @@ import com.premiumnotes.model.PageBackground
 import com.premiumnotes.model.PageSummary
 import com.premiumnotes.model.PenStyle
 import com.premiumnotes.model.PenType
+import com.premiumnotes.model.ShapeKind
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -106,6 +108,17 @@ private val PEN_TYPES = listOf(
     PenType.PENCIL to "Pencil",
     PenType.MARKER to "Marker",
     PenType.CALLIGRAPHY to "Calligraphy",
+)
+
+private val SHAPE_KINDS = listOf(
+    ShapeKind.RECT to "Rectangle",
+    ShapeKind.TRIANGLE to "Triangle",
+    ShapeKind.CIRCLE to "Circle",
+    ShapeKind.ELLIPSE to "Ellipse",
+    ShapeKind.LINE to "Line",
+    ShapeKind.ARROW to "Arrow",
+    ShapeKind.STAR to "Star",
+    ShapeKind.POLYGON to "Hexagon",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -176,8 +189,12 @@ fun EditorScreen(
     val tool by editorState!!.tool.collectAsState()
     val penStyle by editorState!!.penStyle.collectAsState()
     val eraserSize by editorState!!.eraserSizeMm.collectAsState()
+    val shapeKind by editorState!!.shapeKind.collectAsState()
     val selectedIds by editorState!!.selectedIds.collectAsState()
     val settings by settingsFlow.collectAsState(initial = PalmRejectionSettings())
+
+    // The page rail is a hideable overlay so the canvas stays full-screen for writing.
+    var showRail by remember { mutableStateOf(false) }
 
     val pageBackground = remember(pageId) {
         pageList.firstOrNull { it.id == pageId }?.background ?: PageBackground()
@@ -192,6 +209,7 @@ fun EditorScreen(
                 onUndo = { vm.undo() },
                 onRedo = { vm.redo() },
                 onBack = onBack,
+                onToggleRail = { showRail = !showRail },
                 onExportPdf = {
                     scope.launch {
                         val file = withContext(Dispatchers.IO) {
@@ -221,6 +239,7 @@ fun EditorScreen(
                 tool = tool,
                 penStyle = penStyle,
                 eraserSizeMm = eraserSize,
+                shapeKind = shapeKind,
                 settings = settings,
                 selectedCount = selectedIds.size,
                 onTool = { t ->
@@ -236,6 +255,7 @@ fun EditorScreen(
                         else -> Unit
                     }
                 },
+                onShapeKind = { vm.setShapeKind(it) },
                 onColor = { color ->
                     vm.setPenStyle(penStyle.copy(colorArgb = color))
                 },
@@ -266,43 +286,49 @@ fun EditorScreen(
             // Phones (narrow) get a slim page strip so the canvas keeps its width;
             // tablets/landscape get the full page rail.
             val compact = maxWidth < 600.dp
-            Row(Modifier.fillMaxSize()) {
-                PageRail(
-                    pages = pageList,
-                    currentPageId = pageId,
-                    compact = compact,
-                    modifier = Modifier
-                        .width(if (compact) 72.dp else 150.dp)
-                        .fillMaxHeight(),
-                    onSelectPage = { id -> selectedPageId = id },
-                    onNewPage = { scope.launch { repository.createPage(notebookId) } },
-                )
 
-                HorizontalDivider(
-                    modifier = Modifier.width(1.dp).fillMaxHeight(),
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                )
-
-                AndroidView(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    factory = { ctx ->
-                        InkCanvasView(ctx).also { view ->
-                            view.capabilities = capabilities
-                            view.engine = engine
-                            view.listener = vm.canvasListener
-                            engine.reset()
-                        }
-                    },
-                    update = { view ->
-                        view.strokes = content.strokes
-                        view.penStyle = penStyle
-                        view.tool = tool
-                        view.eraserSizeMm = eraserSize
-                        view.background = pageBackground
-                        view.selectionBoundsMm = editorState!!.selectionBoundsMm
+            // Canvas fills the whole screen so you can write edge to edge; the page rail
+            // is a hideable overlay toggled from the top bar.
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    InkCanvasView(ctx).also { view ->
+                        view.capabilities = capabilities
+                        view.engine = engine
                         view.listener = vm.canvasListener
+                        engine.reset()
                     }
-                )
+                },
+                update = { view ->
+                    view.strokes = content.strokes
+                    view.shapes = content.shapeObjects
+                    view.penStyle = penStyle
+                    view.tool = tool
+                    view.eraserSizeMm = eraserSize
+                    view.shapeKind = shapeKind
+                    view.background = pageBackground
+                    view.selectionBoundsMm = editorState!!.selectionBoundsMm
+                    view.listener = vm.canvasListener
+                }
+            )
+
+            if (showRail) {
+                Row(Modifier.fillMaxHeight()) {
+                    PageRail(
+                        pages = pageList,
+                        currentPageId = pageId,
+                        compact = compact,
+                        modifier = Modifier
+                            .width(if (compact) 72.dp else 150.dp)
+                            .fillMaxHeight(),
+                        onSelectPage = { id -> selectedPageId = id },
+                        onNewPage = { scope.launch { repository.createPage(notebookId) } },
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.width(1.dp).fillMaxHeight(),
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
             }
         }
     }
@@ -317,6 +343,7 @@ private fun EditorTopBar(
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onBack: () -> Unit,
+    onToggleRail: () -> Unit,
     onExportPdf: () -> Unit,
 ) {
     TopAppBar(
@@ -329,6 +356,9 @@ private fun EditorTopBar(
             }
         },
         actions = {
+            IconButton(onClick = onToggleRail) {
+                Icon(Icons.Filled.Menu, contentDescription = "Show or hide pages")
+            }
             IconButton(onClick = onUndo, enabled = canUndo) {
                 Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
             }
@@ -434,9 +464,11 @@ private fun EditorToolbar(
     tool: Tool,
     penStyle: PenStyle,
     eraserSizeMm: Float,
+    shapeKind: ShapeKind,
     settings: PalmRejectionSettings,
     selectedCount: Int,
     onTool: (Tool) -> Unit,
+    onShapeKind: (ShapeKind) -> Unit,
     onColor: (Long) -> Unit,
     onWidth: (Float) -> Unit,
     onPenType: (PenType) -> Unit,
@@ -478,11 +510,16 @@ private fun EditorToolbar(
                     onClick = { onTool(Tool.SELECT) },
                     content = { Icon(Icons.Filled.SelectAll, contentDescription = "Select") },
                 )
+                ToolButton(
+                    label = "Shapes",
+                    selected = tool == Tool.SHAPES,
+                    onClick = { onTool(Tool.SHAPES) },
+                    content = { Icon(Icons.Filled.Category, contentDescription = "Shapes") },
+                )
 
                 Spacer(Modifier.width(8.dp))
 
                 // Tools that are not implemented yet — explicitly disabled, never faked.
-                DisabledToolButton(Icons.Filled.Category, "Shapes (in progress)")
                 DisabledToolButton(Icons.Filled.TextFields, "Text (in progress)")
                 DisabledToolButton(Icons.Filled.Image, "Image (in progress)")
             }
@@ -525,63 +562,12 @@ private fun EditorToolbar(
                         }
                         Spacer(Modifier.height(6.dp))
                     }
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text("Color", style = MaterialTheme.typography.labelMedium)
-                        PALETTE.forEach { c ->
-                            val selected = penStyle.colorArgb == c
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(c))
-                                    .border(
-                                        width = 2.dp,
-                                        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                        shape = CircleShape,
-                                    )
-                                    .clickable { onColor(c) },
-                                contentAlignment = Alignment.Center,
-                            ) {}
-                        }
-                    }
+                    ColorRow(penStyle = penStyle, onColor = onColor)
                     Spacer(Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text("Width", style = MaterialTheme.typography.labelMedium)
-                        PEN_WIDTHS_MM.forEach { w ->
-                            val selected = kotlin.math.abs(penStyle.widthMm - w) < 0.01f
-                            Box(
-                                modifier = Modifier
-                                    .size(26.dp)
-                                    .clip(CircleShape)
-                                    .border(
-                                        width = if (selected) 2.dp else 1.dp,
-                                        color = if (selected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.outlineVariant,
-                                        shape = CircleShape,
-                                    )
-                                    .clickable { onWidth(w) },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size((w * 3).dp)
-                                        .clip(CircleShape)
-                                        .background(penStyle.colorArgb.toColor())
-                                )
-                            }
-                        }
-                        if (tool == Tool.HIGHLIGHTER) {
-                            Spacer(Modifier.width(8.dp))
-                            Text("Highlighter: translucent, wide", style = MaterialTheme.typography.bodySmall)
-                        }
+                    WidthRow(penStyle = penStyle, onWidth = onWidth)
+                    if (tool == Tool.HIGHLIGHTER) {
+                        Spacer(Modifier.height(6.dp))
+                        Text("Highlighter: translucent, wide", style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(6.dp))
                     Row(
@@ -609,6 +595,40 @@ private fun EditorToolbar(
                             }
                         }
                     }
+                }
+                Tool.SHAPES -> {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Shape", style = MaterialTheme.typography.labelMedium)
+                        SHAPE_KINDS.forEach { (kind, label) ->
+                            val selected = shapeKind == kind
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                        shape = RoundedCornerShape(6.dp),
+                                    )
+                                    .clickable { onShapeKind(kind) }
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                            ) {
+                                Text(label, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    ColorRow(penStyle = penStyle, onColor = onColor)
+                    Spacer(Modifier.height(6.dp))
+                    WidthRow(penStyle = penStyle, onWidth = onWidth)
                 }
                 Tool.ERASER -> {
                     Row(
@@ -669,6 +689,67 @@ private fun EditorToolbar(
                     }
                 }
                 else -> Unit
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorRow(penStyle: PenStyle, onColor: (Long) -> Unit) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Color", style = MaterialTheme.typography.labelMedium)
+        PALETTE.forEach { c ->
+            val selected = penStyle.colorArgb == c
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(Color(c))
+                    .border(
+                        width = 2.dp,
+                        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        shape = CircleShape,
+                    )
+                    .clickable { onColor(c) },
+                contentAlignment = Alignment.Center,
+            ) {}
+        }
+    }
+}
+
+@Composable
+private fun WidthRow(penStyle: PenStyle, onWidth: (Float) -> Unit) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Width", style = MaterialTheme.typography.labelMedium)
+        PEN_WIDTHS_MM.forEach { w ->
+            val selected = kotlin.math.abs(penStyle.widthMm - w) < 0.01f
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .border(
+                        width = if (selected) 2.dp else 1.dp,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant,
+                        shape = CircleShape,
+                    )
+                    .clickable { onWidth(w) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size((w * 3).dp)
+                        .clip(CircleShape)
+                        .background(penStyle.colorArgb.toColor())
+                )
             }
         }
     }
