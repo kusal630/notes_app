@@ -44,8 +44,10 @@ class InkCanvasView @JvmOverloads constructor(
 
     interface Listener {
         fun onStrokeCommitted(stroke: Stroke)
+        fun onEraseGestureBegin()
         fun onEraseAt(x: Float, y: Float, radiusMm: Float)
         fun onEraseAlong(x1: Float, y1: Float, x2: Float, y2: Float, radiusMm: Float)
+        fun onEraseGestureEnd()
         fun onViewportChanged(zoom: Float, offsetX: Float, offsetY: Float)
         fun onSelectInRect(rect: RectF)
         fun onSelectionDragStart(worldX: Float, worldY: Float)
@@ -68,6 +70,7 @@ class InkCanvasView @JvmOverloads constructor(
                 if (value.isNotEmpty()) {
                     strokeIdCounter = maxOf(strokeIdCounter, value.maxOf { it.id })
                 }
+                invalidate()
             }
         }
 
@@ -165,6 +168,15 @@ class InkCanvasView @JvmOverloads constructor(
         val input = MotionEventParser.parse(event)
         val classified = engine.process(input)
 
+        // Two-finger gestures take priority over the active tool so the page can be
+        // panned/zoomed while a pen is selected — otherwise the user gets stuck at the
+        // bottom of a scrolled page with no way back up. This also covers the moment a
+        // second contact lands while a stroke is in progress (handleNavigation finalizes it).
+        if (classified.gesturePointerIds.size >= 2) {
+            handleNavigation(input, classified)
+            return true
+        }
+
         when {
             tool == Tool.ERASER -> handleEraser(input, classified)
             tool == Tool.PEN || tool == Tool.HIGHLIGHTER -> handleStroke(input, classified)
@@ -208,6 +220,7 @@ class InkCanvasView @JvmOverloads constructor(
                             listener?.onStrokeCommitted(stroke)
                             activePath.reset()
                         }
+                        invalidate()
                     }
                 }
             }
@@ -217,6 +230,7 @@ class InkCanvasView @JvmOverloads constructor(
                 strokeBuilder = null
                 writingPointerId = -1
                 activePath.reset()
+                invalidate()
             }
 
             else -> {
@@ -257,7 +271,20 @@ class InkCanvasView @JvmOverloads constructor(
                         }
                         val worldX = screenToWorldX(contact.contact.x)
                         val worldY = screenToWorldY(contact.contact.y)
+                        // Coalesced history samples (older first) carry the pointer motion
+                        // the OS batched into this event; feeding them to the smoother keeps
+                        // fast strokes continuous instead of dropping points.
+                        var changed = false
+                        for (h in input.history) {
+                            if (h.pointerId != writingId) continue
+                            if (builder.onMove(screenToWorldX(h.x), screenToWorldY(h.y), h.eventTimeNanos)) {
+                                changed = true
+                            }
+                        }
                         if (builder.onMove(worldX, worldY, contact.contact.eventTimeNanos)) {
+                            changed = true
+                        }
+                        if (changed) {
                             rebuildActivePath()
                             invalidate()
                         }
@@ -271,6 +298,27 @@ class InkCanvasView @JvmOverloads constructor(
 
     private var strokeIdCounter = 0L
     private fun nextStrokeId(): Long = ++strokeIdCounter
+
+    /**
+     * Commits any stroke currently being drawn, e.g. when a two-finger gesture starts.
+     * Without this the in-progress stroke would be silently dropped by the canvas lock
+     * being released for the gesture.
+     */
+    private fun finalizeActiveStroke() {
+        val builder = strokeBuilder ?: return
+        strokeBuilder = null
+        writingPointerId = -1
+        val last = builder.livePoints.lastOrNull()
+        if (last == null) {
+            activePath.reset()
+            invalidate()
+            return
+        }
+        val stroke = builder.onUp(last.x, last.y, 0L)
+        if (stroke != null) listener?.onStrokeCommitted(stroke)
+        activePath.reset()
+        invalidate()
+    }
 
     // --- selection ---
 
@@ -348,16 +396,51 @@ class InkCanvasView @JvmOverloads constructor(
             rect.bottom * scale + offsetY,
         )
 
-    // --- eraser ---
+    private var lastEraserPoint: Point? = null
+
+    /** Pointer driving the eraser for the current gesture, tracked so classification
+     *  flicker (WRITING vs FINGER) doesn't drop or swap the eraser mid-stroke. */
+    private var eraserPointerId: Int = -1
+
+    private fun eraserContact(classified: ClassifiedFrame): com.premiumnotes.input.ClassifiedContact? {
+        var id = eraserPointerId
+        if (id == -1) {
+            id = classified.activeWritingPointerId
+                ?: classified.contacts.firstOrNull {
+                    it.classification == com.premiumnotes.input.ContactClassification.WRITING ||
+                        it.classification == com.premiumnotes.input.ContactClassification.ERASER ||
+                        it.classification == com.premiumnotes.input.ContactClassification.FINGER
+                }?.contact?.pointerId
+                ?: -1
+        }
+        if (id == -1) return null
+        val contact = classified.contactFor(id)
+        if (contact == null ||
+            contact.classification == com.premiumnotes.input.ContactClassification.PALM ||
+            contact.classification == com.premiumnotes.input.ContactClassification.REJECTED
+        ) {
+            eraserPointerId = -1
+            return null
+        }
+        eraserPointerId = id
+        return contact
+    }
 
     private fun handleEraser(input: InputFrame, classified: ClassifiedFrame) {
         when (input.action) {
             com.premiumnotes.input.InputAction.DOWN,
             com.premiumnotes.input.InputAction.POINTER_DOWN,
-            com.premiumnotes.input.InputAction.MOVE,
             -> {
-                val writingId = classified.activeWritingPointerId ?: return
-                val contact = classified.contactFor(writingId) ?: return
+                listener?.onEraseGestureBegin()
+                val contact = eraserContact(classified) ?: return
+                val worldX = screenToWorldX(contact.contact.x)
+                val worldY = screenToWorldY(contact.contact.y)
+                val radius = eraserSizeMm / 2f
+                listener?.onEraseAt(worldX, worldY, radius)
+                lastEraserPoint = Point(worldX, worldY)
+            }
+            com.premiumnotes.input.InputAction.MOVE -> {
+                val contact = eraserContact(classified) ?: return
                 val worldX = screenToWorldX(contact.contact.x)
                 val worldY = screenToWorldY(contact.contact.y)
                 val radius = eraserSizeMm / 2f
@@ -372,11 +455,13 @@ class InkCanvasView @JvmOverloads constructor(
             com.premiumnotes.input.InputAction.UP,
             com.premiumnotes.input.InputAction.POINTER_UP,
             com.premiumnotes.input.InputAction.CANCEL,
-            -> lastEraserPoint = null
+            -> {
+                lastEraserPoint = null
+                eraserPointerId = -1
+                listener?.onEraseGestureEnd()
+            }
         }
     }
-
-    private var lastEraserPoint: Point? = null
 
     // --- navigation / gestures ---
 
@@ -397,6 +482,9 @@ class InkCanvasView @JvmOverloads constructor(
             com.premiumnotes.input.InputAction.DOWN,
             com.premiumnotes.input.InputAction.POINTER_DOWN,
             -> {
+                // A second contact joined while drawing: commit the stroke so the gesture
+                // doesn't lose it, then begin panning/zooming.
+                finalizeActiveStroke()
                 gesture = GestureStart(cx, cy, dist, zoom, offsetX, offsetY)
             }
             com.premiumnotes.input.InputAction.MOVE -> {
@@ -484,7 +572,6 @@ class InkCanvasView @JvmOverloads constructor(
         layerScale = scale
         layerOffsetX = offsetX
         layerOffsetY = offsetY
-        strokesVersion = this.strokesVersion
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -517,7 +604,7 @@ class InkCanvasView @JvmOverloads constructor(
             layer == null ||
                 layer!!.width != width || layer.height != height ||
                 rebuildPending ||
-                strokesVersion != this.strokesVersion ||
+                renderedVersion != strokesVersion ||
                 kotlin.math.abs(offsetX - layerOffsetX) > w * 0.25f ||
                 kotlin.math.abs(offsetY - layerOffsetY) > h * 0.25f ||
                 ratio < 0.6f || ratio > 1.7f

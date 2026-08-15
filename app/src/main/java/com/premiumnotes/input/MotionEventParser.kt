@@ -42,10 +42,25 @@ object MotionEventParser {
             contacts += sample(event, i, event.eventTime)
         }
 
+        // Coalesced/historical samples: the OS batches several pointer positions into a
+        // single MOVE. Exposing them lets the stroke builder keep fast strokes smooth
+        // instead of losing intermediate points. Historical frames are ordered oldest
+        // first and always precede the current [contacts].
+        val history = ArrayList<RawTouchContact>()
+        if (action == InputAction.MOVE && event.historySize > 0) {
+            for (h in 0 until event.historySize) {
+                val hTime = event.getHistoricalEventTime(h)
+                for (i in 0 until event.pointerCount) {
+                    history += historicalSample(event, i, h, hTime)
+                }
+            }
+        }
+
         return InputFrame(
             action = action,
             eventTimeNanos = event.eventTime * 1_000_000L,
             contacts = contacts,
+            history = history,
             addedPointerId = addedPointerId,
             liftedPointerId = liftedPointerId,
         )
@@ -78,4 +93,23 @@ object MotionEventParser {
             downTimeNanos = event.downTime * 1_000_000L,
         )
     }
+
+    private fun historicalSample(
+        event: MotionEvent,
+        pointerIndex: Int,
+        historyIndex: Int,
+        timeMs: Long,
+    ): RawTouchContact = RawTouchContact(
+        pointerId = event.getPointerId(pointerIndex),
+        x = event.getHistoricalX(pointerIndex, historyIndex),
+        y = event.getHistoricalY(pointerIndex, historyIndex),
+        pressure = event.getHistoricalPressure(pointerIndex, historyIndex),
+        size = event.getHistoricalSize(pointerIndex, historyIndex),
+        toolMajorPx = event.getHistoricalToolMajor(pointerIndex, historyIndex),
+        toolMinorPx = event.getHistoricalToolMinor(pointerIndex, historyIndex),
+        orientation = event.getHistoricalOrientation(pointerIndex, historyIndex),
+        toolTypeRaw = event.getToolType(pointerIndex),
+        eventTimeNanos = timeMs * 1_000_000L,
+        downTimeNanos = event.downTime * 1_000_000L,
+    )
 }

@@ -3,8 +3,10 @@ package com.premiumnotes.editor
 import android.graphics.RectF
 import com.premiumnotes.model.PageContent
 import com.premiumnotes.model.PenStyle
+import com.premiumnotes.model.PenType
 import com.premiumnotes.model.Stroke
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -81,5 +83,43 @@ class NoteEditorStateTest {
         val redone = s.content.value.strokes.single()
         assertEquals(30f, redone.pointsPacked[0])
         assertEquals(30f, redone.pointsPacked[1])
+    }
+
+    @Test
+    fun eraseGestureCoalescesIntoSingleUndoStep() {
+        val s = state(stroke(1, 0f, 0f, 5f, 5f), stroke(2, 100f, 100f, 110f, 110f))
+        s.eraseGestureBegin()
+        s.eraseAt(0.5f, 0.5f, 1f)
+        s.eraseAlong(100f, 95f, 100f, 105f, 1f)
+        s.eraseGestureEnd()
+        assertEquals(0, s.content.value.strokes.size)
+
+        // One undo restores everything erased during the gesture.
+        s.undo()
+        assertEquals(2, s.content.value.strokes.size)
+    }
+
+    @Test
+    fun eraseWithoutGestureStillUndoable() {
+        val s = state(stroke(1, 0f, 0f, 5f, 5f))
+        s.eraseAt(0.5f, 0.5f, 1f)
+        assertEquals(0, s.content.value.strokes.size)
+        s.undo()
+        assertEquals(1, s.content.value.strokes.size)
+    }
+
+    @Test
+    fun inkStyleSavedAndRestoredAcrossHighlighter() {
+        val s = state()
+        s.setPenStyle(PenStyle(type = PenType.FOUNTAIN, widthMm = 1.5f, colorArgb = 0xFFE53935))
+        s.saveInkStyle()
+        assertEquals(PenType.FOUNTAIN, s.savedInkStyle.value?.type)
+
+        s.setPenStyle(PenStyle(type = PenType.HIGHLIGHTER, opacity = 0.4f, widthMm = 5f))
+        s.restoreInkStyle()
+        assertEquals(PenType.FOUNTAIN, s.penStyle.value.type)
+        assertEquals(1.5f, s.penStyle.value.widthMm)
+        assertEquals(0xFFE53935, s.penStyle.value.colorArgb)
+        assertNull(s.savedInkStyle.value)
     }
 }

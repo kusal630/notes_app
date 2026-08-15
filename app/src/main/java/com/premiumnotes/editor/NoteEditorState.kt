@@ -46,6 +46,14 @@ class NoteEditorState(
     private var selectionAnchor: Point? = null
     private var selectionOriginals: List<Stroke>? = null
 
+    // Erase-gesture bookkeeping: strokes removed during one press-to-lift coalesce into
+    // a single undo entry so undoing an erase restores everything at once.
+    private var eraseBatch: MutableList<Stroke>? = null
+
+    /** Ink pen style saved while the user switches to the highlighter (or back). */
+    private val _savedInkStyle = MutableStateFlow<PenStyle?>(null)
+    val savedInkStyle: StateFlow<PenStyle?> = _savedInkStyle.asStateFlow()
+
     val canUndo: Boolean get() = undoRedo.canUndo
     val canRedo: Boolean get() = undoRedo.canRedo
 
@@ -185,7 +193,12 @@ class NoteEditorState(
     fun eraseAt(x: Float, y: Float, radiusMm: Float): Int {
         val hit = _content.value.strokes.filter { strokeIntersects(it, x, y, radiusMm) }
         if (hit.isEmpty()) return 0
-        apply(RemoveStrokesCommand(hit))
+        if (eraseBatch != null) {
+            eraseBatch!!.addAll(hit)
+            removeStrokes(hit)
+        } else {
+            apply(RemoveStrokesCommand(hit))
+        }
         return hit.size
     }
 
@@ -193,8 +206,54 @@ class NoteEditorState(
     fun eraseAlong(fromX: Float, fromY: Float, toX: Float, toY: Float, radiusMm: Float): Int {
         val hit = _content.value.strokes.filter { strokeIntersectsSegment(it, fromX, fromY, toX, toY, radiusMm) }
         if (hit.isEmpty()) return 0
-        apply(RemoveStrokesCommand(hit))
+        if (eraseBatch != null) {
+            eraseBatch!!.addAll(hit)
+            removeStrokes(hit)
+        } else {
+            apply(RemoveStrokesCommand(hit))
+        }
         return hit.size
+    }
+
+    /**
+     * Opens an erase gesture. Strokes erased until [eraseGestureEnd] are batched into one
+     * undo step; without this every MOVE during an erase would push its own undo entry.
+     */
+    fun eraseGestureBegin() {
+        if (eraseBatch == null) eraseBatch = ArrayList()
+    }
+
+    /** Closes the erase gesture and records the batch as a single undoable command. */
+    fun eraseGestureEnd() {
+        val batch = eraseBatch ?: return
+        eraseBatch = null
+        if (batch.isNotEmpty()) {
+            val distinct = batch.distinctBy { it.id }
+            if (distinct.isNotEmpty()) undoRedo.push(RemoveStrokesCommand(distinct))
+        }
+    }
+
+    private fun removeStrokes(hit: List<Stroke>) {
+        val ids = hit.mapTo(HashSet()) { it.id }
+        _content.value = _content.value.copy(strokes = _content.value.strokes.filterNot { ids.contains(it.id) })
+    }
+
+    /** Remembers the current pen style so the user can return to it after highlighting. */
+    fun saveInkStyle() {
+        if (_penStyle.value.type != PenType.HIGHLIGHTER) {
+            _savedInkStyle.value = _penStyle.value
+        }
+    }
+
+    /** Restores the ink pen style saved by [saveInkStyle], if any. */
+    fun restoreInkStyle() {
+        val ink = _savedInkStyle.value
+        if (ink != null) {
+            _penStyle.value = ink
+            _savedInkStyle.value = null
+        } else if (_penStyle.value.type == PenType.HIGHLIGHTER) {
+            _penStyle.value = _penStyle.value.copy(type = PenType.BALLPOINT, opacity = 1f)
+        }
     }
 
     private fun strokeIntersects(stroke: Stroke, x: Float, y: Float, r: Float): Boolean {

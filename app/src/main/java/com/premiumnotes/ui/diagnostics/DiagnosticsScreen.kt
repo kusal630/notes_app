@@ -67,7 +67,16 @@ fun DiagnosticsScreen(
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
-            title = { Text("Palm Rejection Test") },
+            title = {
+                Column {
+                    Text("Labs", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "Palm rejection test & calibration",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

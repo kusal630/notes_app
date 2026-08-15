@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -168,8 +169,7 @@ fun SettingsContent(
     onSettingChange: (PalmRejectionSettings) -> Unit,
 ) {
     Column(Modifier.padding(16.dp).fillMaxSize().verticalScroll(rememberScrollState())) {
-        Text("Writing", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(16.dp))
+        SettingsSectionTitle("Writing")
 
         // Finger writing
         Row(
@@ -179,9 +179,11 @@ fun SettingsContent(
             Column(Modifier.weight(1f)) {
                 Text("Finger writing", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Write with your finger while palm rejection stays on. " +
-                        "A second contact touching the screen is still treated as a palm.",
+                    "Write with a bare finger while palm rejection stays on. " +
+                        "Palm-sized contacts are still rejected; a second finger starts a " +
+                        "two-finger pan/zoom.",
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Switch(
@@ -190,10 +192,10 @@ fun SettingsContent(
             )
         }
 
-        Spacer(Modifier.height(16.dp))
+        SettingsSectionDivider()
+        SettingsSectionTitle("Palm Rejection")
 
-        // Palm Rejection Mode
-        Text("Palm Rejection Mode", style = MaterialTheme.typography.bodyLarge)
+        Text("Mode", style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(8.dp))
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             PalmRejectionMode.values().forEachIndexed { index, mode ->
@@ -201,14 +203,22 @@ fun SettingsContent(
                     selected = settings.mode == mode,
                     onClick = { onSettingChange(settings.copy(mode = mode)) },
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = PalmRejectionMode.values().size)
-                ) { Text(mode.name) }
+                ) { Text(mode.label) }
             }
         }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            modeHelp(settings.mode),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         Spacer(Modifier.height(16.dp))
 
-        // Sensitivity
-        Text("Palm Rejection Sensitivity: ${(settings.sensitivity * 100).toInt()}%", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            "Palm Rejection Sensitivity: ${(settings.sensitivity * 100).toInt()}%",
+            style = MaterialTheme.typography.bodyLarge,
+        )
         androidx.compose.material3.Slider(
             value = settings.sensitivity,
             onValueChange = { v -> onSettingChange(settings.copy(sensitivity = v)) },
@@ -217,10 +227,15 @@ fun SettingsContent(
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(Modifier.height(24.dp))
-        Text("Calibration", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(16.dp))
-        Text("Use the Palm Rejection Test screen to calibrate. Calibration values:", style = MaterialTheme.typography.bodyMedium)
+        SettingsSectionDivider()
+        SettingsSectionTitle("Calibration")
+
+        Text(
+            "Run the Labs screen to measure your hardware, then re-tune these values here. " +
+                "Calibrated values:",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.height(8.dp))
         settings.calibration?.let { cal ->
             Column(Modifier.fillMaxWidth()) {
@@ -230,10 +245,10 @@ fun SettingsContent(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
-        Text("Stroke Smoothing", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(16.dp))
-        Text("Smoothing Level", style = MaterialTheme.typography.bodyLarge)
+        SettingsSectionDivider()
+        SettingsSectionTitle("Stroke Smoothing")
+
+        Text("Smoothing level", style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(8.dp))
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SmoothingMode.values().forEachIndexed { index, sm ->
@@ -245,4 +260,38 @@ fun SettingsContent(
             }
         }
     }
+}
+
+private val PalmRejectionMode.label: String
+    get() = when (this) {
+        PalmRejectionMode.WRITING -> "Writing"
+        PalmRejectionMode.BALANCED -> "Balanced"
+        PalmRejectionMode.RELAXED -> "Relaxed"
+        PalmRejectionMode.STRICT -> "Strict"
+    }
+
+private fun modeHelp(mode: PalmRejectionMode): String = when (mode) {
+    PalmRejectionMode.WRITING ->
+        "Best for a stylus or one finger: a resting palm is always rejected, and a second " +
+            "finger starts a two-finger pan/zoom."
+    PalmRejectionMode.BALANCED ->
+        "Default for mixed use: fingertips write, two-finger gestures work, and palm-sized " +
+            "contacts are ignored."
+    PalmRejectionMode.RELAXED ->
+        "Accepts larger contacts for relaxed writing; palm rejection is weakest."
+    PalmRejectionMode.STRICT ->
+        "Most aggressive palm rejection: only small contacts can write."
+}
+
+@Composable
+private fun SettingsSectionTitle(title: String) {
+    Text(title, style = MaterialTheme.typography.titleLarge)
+    Spacer(Modifier.height(16.dp))
+}
+
+@Composable
+private fun SettingsSectionDivider() {
+    Spacer(Modifier.height(24.dp))
+    HorizontalDivider()
+    Spacer(Modifier.height(24.dp))
 }

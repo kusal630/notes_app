@@ -61,12 +61,20 @@ class EditorViewModel(
             _editor.value?.apply(AddStrokeCommand(stroke))
         }
 
+        override fun onEraseGestureBegin() {
+            _editor.value?.eraseGestureBegin()
+        }
+
         override fun onEraseAt(x: Float, y: Float, radiusMm: Float) {
             _editor.value?.eraseAt(x, y, radiusMm)
         }
 
         override fun onEraseAlong(x1: Float, y1: Float, x2: Float, y2: Float, radiusMm: Float) {
             _editor.value?.eraseAlong(x1, y1, x2, y2, radiusMm)
+        }
+
+        override fun onEraseGestureEnd() {
+            _editor.value?.eraseGestureEnd()
         }
 
         override fun onViewportChanged(zoom: Float, offsetX: Float, offsetY: Float) {

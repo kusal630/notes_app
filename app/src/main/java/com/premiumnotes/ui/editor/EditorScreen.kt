@@ -228,9 +228,11 @@ fun EditorScreen(
                     if (t != Tool.SELECT) vm.clearSelection()
                     when (t) {
                         Tool.HIGHLIGHTER -> if (penStyle.type != PenType.HIGHLIGHTER) {
+                            // Remember the user's ink pen so switching back restores it.
+                            editorState!!.saveInkStyle()
                             vm.setPenStyle(penStyle.copy(type = PenType.HIGHLIGHTER, opacity = 0.4f, widthMm = 5f))
                         }
-                        Tool.PEN -> vm.setPenStyle(penStyle.copy(type = PenType.BALLPOINT, opacity = 1f))
+                        Tool.PEN -> editorState!!.restoreInkStyle()
                         else -> Unit
                     }
                 },

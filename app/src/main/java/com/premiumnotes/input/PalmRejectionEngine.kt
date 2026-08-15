@@ -114,7 +114,7 @@ class PalmRejectionEngine(
         }
 
         when (frame.action) {
-            InputAction.DOWN, InputAction.POINTER_DOWN -> {
+            InputAction.DOWN -> {
                 // A down can only establish the lock. Only the newly added pointer is
                 // eligible — already-down pointers are gestures/palm and must not claim.
                 if (!lock.isActive && frame.addedPointerId != null) {
@@ -131,6 +131,22 @@ class PalmRejectionEngine(
                             respectHoldoff = !currentSettings.enableFingerWriting,
                         )
                     }
+                }
+            }
+
+            InputAction.POINTER_DOWN -> {
+                // A second contact landing while a stroke is locked is the start of a
+                // two-finger gesture (pan/zoom). Release the writing lock so the pair can
+                // drive navigation; a resting palm is classified PALM and never triggers
+                // this. The in-progress stroke is finalized by the view.
+                if (lock.isActive && frame.addedPointerId != null) {
+                    val added = classified.firstOrNull {
+                        it.contact.pointerId == frame.addedPointerId
+                    }
+                    val nonPalm = added != null &&
+                        (added.classification == ContactClassification.WRITING ||
+                            added.classification == ContactClassification.FINGER)
+                    if (nonPalm) lock.reset(nowNanos)
                 }
             }
 
@@ -164,7 +180,9 @@ class PalmRejectionEngine(
     /**
      * Gesture pointers are contacts allowed to pan/zoom. Rules:
      *  - While a writing lock is active, no gestures (a resting palm must not pan).
-     *  - Otherwise up to two contacts classified as FINGER (normal finger interaction).
+     *  - Otherwise up to two non-palm contacts (WRITING fingertips/stylus or FINGER).
+     *    WRITING is included because after the lock is dropped by a second contact the
+     *    original pointer is still WRITING-classified and must remain part of the gesture.
      */
     private fun selectGesturePointers(
         classified: List<ClassifiedContact>,
@@ -173,7 +191,10 @@ class PalmRejectionEngine(
         if (writingPointerId != null) return emptyList()
 
         return classified
-            .filter { it.classification == ContactClassification.FINGER }
+            .filter {
+                it.classification == ContactClassification.WRITING ||
+                    it.classification == ContactClassification.FINGER
+            }
             .take(2)
             .map { it.contact.pointerId }
     }

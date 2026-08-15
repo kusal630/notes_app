@@ -50,12 +50,17 @@ class PalmClassifier(
                 return result(ContactClassification.WRITING, 1f, ClassificationReason.LOCKED_WRITING_POINTER, 0f, ctx)
             }
             if (ctx.writingLockActive) {
-                // A large contact very close to the writing pointer is likely the hand
-                // holding the pen — still reject it for strokes, but classify as PALM
-                // rather than noise so the diagnostics are meaningful.
-                return result(
-                    ContactClassification.PALM, 0.95f, ClassificationReason.SECONDARY_WHILE_WRITING, 0f, ctx
-                )
+                // A secondary contact while writing. A palm-sized contact is the resting
+                // hand — reject it and keep the writing lock. A smaller (finger-sized)
+                // contact is a second finger starting a two-finger gesture, so it falls
+                // through to the size rules below and the engine drops the lock so the
+                // pair can navigate.
+                val fingerMax = settings.effectiveFingerMaxMm()
+                if (contact.maxDimMm > fingerMax) {
+                    return result(
+                        ContactClassification.PALM, 0.95f, ClassificationReason.SECONDARY_WHILE_WRITING, 0f, ctx
+                    )
+                }
             }
         }
 

@@ -74,7 +74,7 @@ fun HomeScreen(
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                     IconButton(onClick = onOpenDiagnostics) {
-                        Icon(Icons.Filled.Science, contentDescription = "Palm rejection test")
+                        Icon(Icons.Filled.Science, contentDescription = "Labs")
                     }
                 }
             )

@@ -68,16 +68,16 @@ class PalmRejectionEngineTest {
     }
 
     @Test
-    fun pointerCannotStealLockWhilePenActive() {
+    fun secondFingerWhilePenActiveDropsLockForTwoFingerGesture() {
         val e = engine()
         e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
-        // A second small contact appears while the pen is active.
+        // A finger-sized second contact while a pen tool is active is a gesture intent,
+        // not a palm: the lock drops so the pair can pan/zoom out of the page bottom.
         val finger = TestTouchFactory.fingertip(pointerId = 3, timeMs = 20L)
         val pen = TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 20L)
         val out = e.process(TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(pen, finger), added = 3))
-        assertEquals(0, out.activeWritingPointerId)
-        // In WRITING mode the secondary contact is rejected, never FINGER/gesture.
-        assertTrue(out.gesturePointerIds.isEmpty())
+        assertNull(out.activeWritingPointerId)
+        assertEquals(listOf(0, 3), out.gesturePointerIds)
     }
 
     @Test
@@ -135,6 +135,44 @@ class PalmRejectionEngineTest {
         val out = e.process(
             TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(fingerMove, palmDown), added = 2)
         )
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    @Test
+    fun secondFingerDuringPenDropsLockAndEnablesGesture() {
+        val e = PalmRejectionEngine(testCapabilities()) {
+            testSettings(mode = PalmRejectionMode.WRITING).apply { enableFingerWriting = true }
+        }
+        // Pen starts writing.
+        e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+
+        // A finger-sized second contact is a gesture intent (not a palm): the lock is
+        // released so the pair can pan/zoom even though a pen tool is selected.
+        val pen = TestTouchFactory.pen(0, x = 110f, y = 105f, timeMs = 20L)
+        val finger = TestTouchFactory.fingertip(pointerId = 3, timeMs = 20L)
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(pen, finger), added = 3)
+        )
+        assertNull(out.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+        assertEquals(listOf(0, 3), out.gesturePointerIds)
+    }
+
+    @Test
+    fun palmSizedSecondContactWhileWritingKeepsLock() {
+        val e = PalmRejectionEngine(testCapabilities()) {
+            testSettings(mode = PalmRejectionMode.WRITING).apply { enableFingerWriting = true }
+        }
+        e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+
+        val pen = TestTouchFactory.pen(0, x = 120f, y = 110f, timeMs = 20L)
+        val palm = TestTouchFactory.palm(pointerId = 2, timeMs = 20L)
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(pen, palm), added = 2)
+        )
+        // A palm-sized contact is the resting hand: lock persists, no gesture.
         assertEquals(0, out.activeWritingPointerId)
         assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
         assertTrue(out.gesturePointerIds.isEmpty())
