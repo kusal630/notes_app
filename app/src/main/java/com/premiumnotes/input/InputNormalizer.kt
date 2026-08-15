@@ -8,14 +8,25 @@ package com.premiumnotes.input
  */
 class InputNormalizer(private val capabilities: InputCapabilities) {
 
+    /**
+     * Anything larger than this (mm) is not a real contact — the largest human palm is
+     * far smaller. Some devices (and the emulator) report degenerate getSize() values
+     * near 1.0 (≈ the whole screen); such values are unusable for classification, so we
+     * discard them and let the classifier fall back to its no-geometry heuristic.
+     */
+    companion object {
+        const val MAX_PLAUSIBLE_CONTACT_MM = 120f
+    }
+
     fun normalize(raw: RawTouchContact): NormalizedContact {
-        val hasGeometry = raw.toolMajorPx > 0f && raw.toolMinorPx > 0f
-        val hasSize = raw.size > 0f
+        var hasGeometry = raw.toolMajorPx > 0f && raw.toolMinorPx > 0f
+        var hasSize = raw.size > 0f
+        val maxPlausiblePx = MAX_PLAUSIBLE_CONTACT_MM * capabilities.pxPerMm
 
         val majorPx: Float
         val minorPx: Float
         when {
-            hasGeometry -> {
+            hasGeometry && raw.toolMajorPx < maxPlausiblePx -> {
                 majorPx = raw.toolMajorPx
                 minorPx = raw.toolMinorPx.coerceAtLeast(raw.toolMajorPx * 0.25f)
             }
@@ -23,8 +34,15 @@ class InputNormalizer(private val capabilities: InputCapabilities) {
                 // getSize() is relative to the touch surface; approximate its extent with
                 // the display's largest dimension.
                 val sizePx = raw.size * capabilities.displayMaxPx
-                majorPx = sizePx
-                minorPx = sizePx * 0.7f
+                if (sizePx > maxPlausiblePx) {
+                    // Degenerate value — treat as no usable size.
+                    majorPx = 0f
+                    minorPx = 0f
+                    hasSize = false
+                } else {
+                    majorPx = sizePx
+                    minorPx = sizePx * 0.7f
+                }
             }
             else -> {
                 majorPx = 0f

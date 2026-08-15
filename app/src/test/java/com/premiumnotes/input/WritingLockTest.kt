@@ -48,6 +48,18 @@ class WritingLockTest {
     }
 
     @Test
+    fun holdoffBypassedWhenNotRespected() {
+        val lock = WritingLock(holdoffMs = 100)
+        val MS = 1_000_000L
+        lock.tryClaim(1, 0L)
+        lock.release(1, 50L * MS)
+        // Finger writing: a contact immediately after a lift may re-claim so fast
+        // consecutive strokes are not dropped.
+        assertTrue(lock.tryClaim(2, 60L * MS, respectHoldoff = false))
+        assertEquals(2, lock.activePointerId)
+    }
+
+    @Test
     fun resetClearsLock() {
         val lock = WritingLock(holdoffMs = 0)
         lock.tryClaim(1, 0L)

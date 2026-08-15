@@ -40,6 +40,17 @@ class InputNormalizerTest {
     }
 
     @Test
+    fun degenerateFullScreenSizeIsIgnored() {
+        // Emulators and some devices report getSize() near 1.0 (the whole screen).
+        // Such a value would dwarf any real palm and must not be used for classification.
+        val c = normalizer.normalize(
+            TestTouchFactory.contact(0, 0f, 0f, 0L, majorPx = 0f, minorPx = 0f, size = 1.0f)
+        )
+        assertEquals(false, c.hasSize)
+        assertEquals(0f, c.maxDimMm, 0.01f)
+    }
+
+    @Test
     fun clampsPressureAndSize() {
         val c = normalizer.normalize(
             TestTouchFactory.contact(0, 0f, 0f, 0L, pressure = 5f, size = 3f)

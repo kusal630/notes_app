@@ -24,6 +24,8 @@ class PalmClassifier(
         val writingLockActive: Boolean = false,
         val contactSpeedMmPerSec: Float = 0f,
         val contactDurationMs: Long = 0L,
+        /** When true, a bare finger may act as the writing pointer (palm rejection still on). */
+        val fingerWritingEnabled: Boolean = false,
     )
 
     fun classify(contact: NormalizedContact, ctx: ClassifyContext): ClassificationResult {
@@ -59,17 +61,27 @@ class PalmClassifier(
 
         val dim = contact.maxDimMm
         if (!contact.hasGeometry && !contact.hasSize || dim <= 0f) {
+            // No size/geometry is reported (e.g. the emulator or cheap digitizers). With
+            // finger writing enabled and a single contact we cannot measure a palm, so the
+            // only/primary contact is accepted as writing; any secondary contact that lands
+            // while the lock is active is still rejected as a palm.
+            if (ctx.fingerWritingEnabled && ctx.mode == PalmRejectionMode.WRITING && ctx.pointerCount <= 1) {
+                return result(ContactClassification.WRITING, 0.5f, ClassificationReason.FINGER_WRITING, 0f, ctx)
+            }
             return result(ContactClassification.FINGER, 0.35f, ClassificationReason.NO_GEOMETRY_INFO, 0f, ctx)
         }
 
         val writingMax = settings.effectiveWritingMaxMm()
         val fingerMax = settings.effectiveFingerMaxMm()
         val relaxedPalm = settings.effectiveRelaxedPalmMm()
+        // With finger writing enabled the writing cutoff widens to the finger threshold so
+        // a bare fingertip is accepted, while a resting palm stays above it and is rejected.
+        val writingDim = if (ctx.fingerWritingEnabled) maxOf(writingMax, fingerMax) else writingMax
 
         return when (ctx.mode) {
             PalmRejectionMode.STRICT -> {
-                if (dim <= writingMax) result(ContactClassification.WRITING, confidenceNear(dim, writingMax, aboveIsGood = false), ClassificationReason.SMALL_CONTACT, writingMax, ctx)
-                else result(ContactClassification.PALM, confidenceNear(dim, writingMax, aboveIsGood = true), ClassificationReason.LARGE_CONTACT, writingMax, ctx)
+                if (dim <= writingDim) result(ContactClassification.WRITING, confidenceNear(dim, writingDim, aboveIsGood = false), ClassificationReason.SMALL_CONTACT, writingDim, ctx)
+                else result(ContactClassification.PALM, confidenceNear(dim, writingDim, aboveIsGood = true), ClassificationReason.LARGE_CONTACT, writingDim, ctx)
             }
             PalmRejectionMode.BALANCED -> {
                 when {
@@ -86,11 +98,12 @@ class PalmClassifier(
                 }
             }
             PalmRejectionMode.WRITING -> {
-                // No writing lock yet: a small contact can become the writer.
-                if (dim <= writingMax) {
-                    result(ContactClassification.WRITING, confidenceNear(dim, writingMax, false), ClassificationReason.SMALL_CONTACT, writingMax, ctx)
+                // No writing lock yet: a small (or finger-sized when enabled) contact can
+                // become the writer; anything larger is a palm and cannot claim writing.
+                if (dim <= writingDim) {
+                    result(ContactClassification.WRITING, confidenceNear(dim, writingDim, false), ClassificationReason.SMALL_CONTACT, writingDim, ctx)
                 } else {
-                    result(ContactClassification.PALM, confidenceNear(dim, writingMax, true), ClassificationReason.LARGE_CONTACT, writingMax, ctx)
+                    result(ContactClassification.PALM, confidenceNear(dim, writingDim, true), ClassificationReason.LARGE_CONTACT, writingDim, ctx)
                 }
             }
         }

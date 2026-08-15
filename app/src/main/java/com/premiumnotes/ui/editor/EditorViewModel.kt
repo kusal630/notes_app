@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * Editor ViewModel: loads a page's content into a [NoteEditorState], exposes it to the
@@ -102,5 +103,11 @@ class EditorViewModel(
 
     override fun onCleared() {
         saveJob?.cancel()
+        // Flush the latest content synchronously so work done just before navigating away
+        // (back, page switch, process recreation) is never lost.
+        val pending = _editor.value?.content?.value
+        if (pending != null) {
+            runBlocking { repository.savePageContent(pageId, pending) }
+        }
     }
 }

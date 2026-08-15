@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +26,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -151,6 +153,7 @@ fun SettingsScreen(
                         this.writingHoldoffMs = newSettings.writingHoldoffMs
                         this.palmProximityMm = newSettings.palmProximityMm
                         this.smoothing = newSettings.smoothing
+                        this.enableFingerWriting = newSettings.enableFingerWriting
                     }
                 }
             })
@@ -166,6 +169,27 @@ fun SettingsContent(
 ) {
     Column(Modifier.padding(16.dp).fillMaxSize().verticalScroll(rememberScrollState())) {
         Text("Writing", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(16.dp))
+
+        // Finger writing
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Finger writing", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Write with your finger while palm rejection stays on. " +
+                        "A second contact touching the screen is still treated as a palm.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(
+                checked = settings.enableFingerWriting,
+                onCheckedChange = { onSettingChange(settings.copy(enableFingerWriting = it)) },
+            )
+        }
+
         Spacer(Modifier.height(16.dp))
 
         // Palm Rejection Mode

@@ -171,46 +171,34 @@ class InkCanvasView @JvmOverloads constructor(
 
     // --- writing ---
 
+    private var writingPointerId: Int = -1
+
     private fun handleStroke(input: InputFrame, classified: ClassifiedFrame) {
-        val writingId = classified.activeWritingPointerId ?: return
-        val contact = classified.contactFor(writingId) ?: return
-
         when (input.action) {
-            com.premiumnotes.input.InputAction.DOWN,
-            com.premiumnotes.input.InputAction.POINTER_DOWN,
-            -> {
-                if (strokeBuilder == null) {
-                    val builder = StrokeBuilder(
-                        style = penStyle,
-                        id = nextStrokeId(),
-                    )
-                    builder.onDown(screenToWorldX(contact.contact.x), screenToWorldY(contact.contact.y))
-                    strokeBuilder = builder
-                }
-            }
-
-            com.premiumnotes.input.InputAction.MOVE -> {
-                val builder = strokeBuilder ?: return
-                val worldX = screenToWorldX(contact.contact.x)
-                val worldY = screenToWorldY(contact.contact.y)
-                if (builder.onMove(worldX, worldY, contact.contact.eventTimeNanos)) {
-                    rebuildActivePath()
-                    invalidate()
-                }
-            }
-
             com.premiumnotes.input.InputAction.UP,
             com.premiumnotes.input.InputAction.POINTER_UP,
             -> {
-                if (input.liftedPointerId == writingId) {
+                if (input.liftedPointerId == writingPointerId) {
                     val builder = strokeBuilder
                     strokeBuilder = null
+                    writingPointerId = -1
                     builder?.let { b ->
-                        val stroke = b.onUp(
-                            screenToWorldX(contact.contact.x),
-                            screenToWorldY(contact.contact.y),
-                            contact.contact.eventTimeNanos,
-                        )
+                        val contact = classified.contactFor(input.liftedPointerId)
+                        val endX: Float
+                        val endY: Float
+                        val endT: Long
+                        if (contact != null) {
+                            endX = screenToWorldX(contact.contact.x)
+                            endY = screenToWorldY(contact.contact.y)
+                            endT = contact.contact.eventTimeNanos
+                        } else {
+                            val last = b.livePoints.lastOrNull()
+                            if (last == null) return@let
+                            endX = last.x
+                            endY = last.y
+                            endT = 0L
+                        }
+                        val stroke = b.onUp(endX, endY, endT)
                         if (stroke != null) {
                             listener?.onStrokeCommitted(stroke)
                             activePath.reset()
@@ -222,7 +210,40 @@ class InkCanvasView @JvmOverloads constructor(
             com.premiumnotes.input.InputAction.CANCEL -> {
                 strokeBuilder?.onCancel()
                 strokeBuilder = null
+                writingPointerId = -1
                 activePath.reset()
+            }
+
+            else -> {
+                val writingId = classified.activeWritingPointerId ?: return
+                val contact = classified.contactFor(writingId) ?: return
+                when (input.action) {
+                    com.premiumnotes.input.InputAction.DOWN,
+                    com.premiumnotes.input.InputAction.POINTER_DOWN,
+                    -> {
+                        if (strokeBuilder == null) {
+                            val builder = StrokeBuilder(
+                                style = penStyle,
+                                id = nextStrokeId(),
+                            )
+                            builder.onDown(screenToWorldX(contact.contact.x), screenToWorldY(contact.contact.y))
+                            strokeBuilder = builder
+                            writingPointerId = writingId
+                        }
+                    }
+
+                    com.premiumnotes.input.InputAction.MOVE -> {
+                        val builder = strokeBuilder ?: return
+                        val worldX = screenToWorldX(contact.contact.x)
+                        val worldY = screenToWorldY(contact.contact.y)
+                        if (builder.onMove(worldX, worldY, contact.contact.eventTimeNanos)) {
+                            rebuildActivePath()
+                            invalidate()
+                        }
+                    }
+
+                    else -> Unit
+                }
             }
         }
     }
@@ -309,18 +330,16 @@ class InkCanvasView @JvmOverloads constructor(
     // --- eraser ---
 
     private fun handleEraser(input: InputFrame, classified: ClassifiedFrame) {
-        val writingId = classified.activeWritingPointerId ?: return
-        val contact = classified.contactFor(writingId) ?: return
-
-        val worldX = screenToWorldX(contact.contact.x)
-        val worldY = screenToWorldY(contact.contact.y)
-        val radius = eraserSizeMm / 2f
-
         when (input.action) {
             com.premiumnotes.input.InputAction.DOWN,
             com.premiumnotes.input.InputAction.POINTER_DOWN,
             com.premiumnotes.input.InputAction.MOVE,
             -> {
+                val writingId = classified.activeWritingPointerId ?: return
+                val contact = classified.contactFor(writingId) ?: return
+                val worldX = screenToWorldX(contact.contact.x)
+                val worldY = screenToWorldY(contact.contact.y)
+                val radius = eraserSizeMm / 2f
                 val prev = lastEraserPoint
                 if (prev == null) {
                     listener?.onEraseAt(worldX, worldY, radius)

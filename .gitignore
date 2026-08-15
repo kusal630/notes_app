@@ -11,3 +11,4 @@ build/
 app/schemas/
 *.apk
 *.aab
+/gradle/gradle-daemon-jvm.properties

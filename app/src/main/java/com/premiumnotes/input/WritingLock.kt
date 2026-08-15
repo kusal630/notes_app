@@ -22,10 +22,12 @@ class WritingLock(
     /**
      * Attempts to claim [pointerId] as the writing pointer. Honours the hold-off so a
      * new contact immediately following a pen lift (e.g. the same palm) does not lock on.
+     * Finger writing passes [respectHoldoff] = false so fast consecutive finger strokes
+     * (lift and immediately re-touch) are never dropped.
      */
-    fun tryClaim(pointerId: Int, nowNanos: Long): Boolean {
+    fun tryClaim(pointerId: Int, nowNanos: Long, respectHoldoff: Boolean = true): Boolean {
         if (activePointerId != null) return false
-        if (nowNanos - lastLiftNanos < holdoffMs * 1_000_000L) return false
+        if (respectHoldoff && nowNanos - lastLiftNanos < holdoffMs * 1_000_000L) return false
         activePointerId = pointerId
         lockAcquiredAtNanos = nowNanos
         return true

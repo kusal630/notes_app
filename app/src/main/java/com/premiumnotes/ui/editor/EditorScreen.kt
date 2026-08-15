@@ -50,10 +50,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -108,16 +111,32 @@ fun EditorScreen(
 ) {
     val app = LocalContext.current.applicationContext as PremiumNotesApp
     val uiContext = LocalContext.current
-    val pages by repository.pagesFor(notebookId).collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
+    // Pages load asynchronously; null until the real list arrives so we never create a
+    // duplicate page from the initial placeholder emission.
+    var pages by remember { mutableStateOf<List<PageSummary>?>(null) }
+    LaunchedEffect(notebookId) {
+        repository.pagesFor(notebookId).collect { pages = it }
+    }
+    val pageList = pages.orEmpty()
+
     // Ensure at least one page exists before showing the editor.
-    val pageId = pages.firstOrNull()?.id
-    androidx.compose.runtime.LaunchedEffect(pages.size, pageId) {
-        if (pages.isEmpty()) {
+    LaunchedEffect(pageList) {
+        if (pages != null && pageList.isEmpty()) {
             repository.createPage(notebookId)
         }
     }
+
+    // Selected page follows the page rail; falls back to the first page when the current
+    // selection disappears (e.g. after deletion).
+    var selectedPageId by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(pageList) {
+        if (selectedPageId == null || pageList.none { it.id == selectedPageId }) {
+            selectedPageId = pageList.firstOrNull()?.id
+        }
+    }
+    val pageId = selectedPageId
 
     if (pageId == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -148,7 +167,9 @@ fun EditorScreen(
     val selectedIds by editorState!!.selectedIds.collectAsState()
     val settings by settingsFlow.collectAsState(initial = PalmRejectionSettings())
 
-    val pageBackground = remember(pages) { pages.firstOrNull()?.background ?: PageBackground() }
+    val pageBackground = remember(pageId) {
+        pageList.firstOrNull { it.id == pageId }?.background ?: PageBackground()
+    }
 
     Scaffold(
         topBar = {
@@ -225,17 +246,20 @@ fun EditorScreen(
             val compact = maxWidth < 600.dp
             Row(Modifier.fillMaxSize()) {
                 PageRail(
-                    pages = pages,
+                    pages = pageList,
                     currentPageId = pageId,
                     compact = compact,
                     modifier = Modifier
                         .width(if (compact) 72.dp else 150.dp)
                         .fillMaxHeight(),
-                    onSelectPage = {},
+                    onSelectPage = { id -> selectedPageId = id },
                     onNewPage = { scope.launch { repository.createPage(notebookId) } },
                 )
 
-                HorizontalDivider()
+                HorizontalDivider(
+                    modifier = Modifier.width(1.dp).fillMaxHeight(),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
 
                 AndroidView(
                     modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -254,6 +278,7 @@ fun EditorScreen(
                         view.eraserSizeMm = eraserSize
                         view.background = pageBackground
                         view.selectionBoundsMm = editorState!!.selectionBoundsMm
+                        view.listener = vm.canvasListener
                     }
                 )
             }

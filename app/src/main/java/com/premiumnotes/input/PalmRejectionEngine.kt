@@ -59,6 +59,7 @@ class PalmRejectionEngine(
                     writingLockActive = lock.isActive,
                     contactSpeedMmPerSec = state?.speedMmPerSec ?: 0f,
                     contactDurationMs = state?.let { (nowNanos - it.downTimeNanos) / 1_000_000L } ?: 0L,
+                    fingerWritingEnabled = currentSettings.enableFingerWriting,
                 )
             )
             classified += ClassifiedContact(
@@ -122,7 +123,13 @@ class PalmRejectionEngine(
                             it.classification == ContactClassification.WRITING
                     }
                     if (candidate != null) {
-                        lock.tryClaim(frame.addedPointerId, nowNanos)
+                        // Finger writing lifts the hold-off so fast consecutive strokes
+                        // are never dropped; a genuine palm is never a WRITING candidate.
+                        lock.tryClaim(
+                            frame.addedPointerId,
+                            nowNanos,
+                            respectHoldoff = !currentSettings.enableFingerWriting,
+                        )
                     }
                 }
             }

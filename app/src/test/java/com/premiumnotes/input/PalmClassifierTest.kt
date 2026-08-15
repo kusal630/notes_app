@@ -80,6 +80,52 @@ class PalmClassifierTest {
     }
 
     @Test
+    fun fingerWritingAcceptsFingertipInWritingMode() {
+        val ctx = PalmClassifier.ClassifyContext(
+            mode = PalmRejectionMode.WRITING,
+            fingerWritingEnabled = true,
+        )
+        val r = classify(TestTouchFactory.fingertip(), mode = PalmRejectionMode.WRITING, ctx = ctx)
+        assertEquals(ContactClassification.WRITING, r.classification)
+    }
+
+    @Test
+    fun fingerWritingDisabledRejectsFingertipInWritingMode() {
+        val ctx = PalmClassifier.ClassifyContext(
+            mode = PalmRejectionMode.WRITING,
+            fingerWritingEnabled = false,
+        )
+        val r = classify(TestTouchFactory.fingertip(), mode = PalmRejectionMode.WRITING, ctx = ctx)
+        assertEquals(ContactClassification.PALM, r.classification)
+    }
+
+    @Test
+    fun palmStillRejectedWithFingerWritingEnabled() {
+        val ctx = PalmClassifier.ClassifyContext(
+            mode = PalmRejectionMode.WRITING,
+            fingerWritingEnabled = true,
+        )
+        val r = classify(TestTouchFactory.palm(), mode = PalmRejectionMode.WRITING, ctx = ctx)
+        assertEquals(ContactClassification.PALM, r.classification)
+    }
+
+    @Test
+    fun noGeometrySingleContactIsWritingWithFingerWriting() {
+        val ctx = PalmClassifier.ClassifyContext(
+            mode = PalmRejectionMode.WRITING,
+            fingerWritingEnabled = true,
+            pointerCount = 1,
+        )
+        val r = classify(
+            TestTouchFactory.contact(0, 100f, 100f, 0L, majorPx = 0f, minorPx = 0f, size = 0f),
+            mode = PalmRejectionMode.WRITING,
+            ctx = ctx,
+        )
+        assertEquals(ContactClassification.WRITING, r.classification)
+        assertEquals(ClassificationReason.FINGER_WRITING, r.reason)
+    }
+
+    @Test
     fun writingModeRejectsSecondaryContactWhileLocked() {
         val lockedCtx = PalmClassifier.ClassifyContext(
             mode = PalmRejectionMode.WRITING,

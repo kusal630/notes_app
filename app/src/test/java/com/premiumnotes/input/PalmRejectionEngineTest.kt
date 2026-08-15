@@ -108,4 +108,35 @@ class PalmRejectionEngineTest {
         val out = e.process(TestTouchFactory.frame(InputAction.DOWN, 40L, listOf(TestTouchFactory.pen(0, timeMs = 40L)), added = 0))
         assertEquals(0, out.activeWritingPointerId)
     }
+
+    @Test
+    fun fingerWritesInWritingModeWhenFingerWritingEnabled() {
+        val e = PalmRejectionEngine(testCapabilities()) {
+            testSettings(mode = PalmRejectionMode.WRITING).apply { enableFingerWriting = true }
+        }
+        val finger = TestTouchFactory.fingertip(pointerId = 0, timeMs = 0L)
+        val out = e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(finger), added = 0))
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+    }
+
+    @Test
+    fun palmRestingWhileFingerWritesIsRejected() {
+        val e = PalmRejectionEngine(testCapabilities()) {
+            testSettings(mode = PalmRejectionMode.WRITING).apply { enableFingerWriting = true }
+        }
+
+        // Finger starts writing.
+        e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.fingertip(0, timeMs = 0L)), added = 0))
+
+        // Palm lands while the finger is still down; the lock must stay on the finger.
+        val fingerMove = TestTouchFactory.fingertip(0, x = 220f, y = 220f, timeMs = 20L)
+        val palmDown = TestTouchFactory.palm(pointerId = 2, timeMs = 20L)
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(fingerMove, palmDown), added = 2)
+        )
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
 }

@@ -34,6 +34,12 @@ data class PalmRejectionSettings(
     var palmProximityMm: Float = 8f,
     var calibration: CalibrationData = CalibrationData(),
     var smoothing: SmoothingMode = SmoothingMode.MEDIUM,
+    /**
+     * Allows a bare finger to become the writing pointer while palm rejection stays
+     * active: in WRITING/STRICT modes a finger-sized contact is accepted as writing,
+     * and the writing lock still rejects any additional (palm) contact.
+     */
+    var enableFingerWriting: Boolean = true,
 ) {
     /** Applies user calibration and sensitivity to yield the effective writing cutoff. */
     fun effectiveWritingMaxMm(): Float {
