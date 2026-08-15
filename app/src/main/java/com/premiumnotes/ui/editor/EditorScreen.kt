@@ -93,11 +93,20 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 
 private val PALETTE = listOf(
-    0xFF000000, 0xFFFFFFFF, 0xFFE53935, 0xFFFB8C00, 0xFFFDD835,
+    0xFF000000, 0xFF424242, 0xFFFFFFFF, 0xFFE53935, 0xFFFB8C00, 0xFFFDD835,
     0xFF43A047, 0xFF00ACC1, 0xFF1E88E5, 0xFF8E24AA, 0xFFEC407A,
 )
 
-private val PEN_WIDTHS_MM = listOf(0.8f, 1.2f, 2f, 4f)
+private val PEN_WIDTHS_MM = listOf(0.3f, 0.5f, 0.7f, 1f, 1.5f, 2f, 3f, 5f)
+
+private val PEN_TYPES = listOf(
+    PenType.BALLPOINT to "Ballpoint",
+    PenType.MONOLINE to "Gel",
+    PenType.FOUNTAIN to "Fountain",
+    PenType.PENCIL to "Pencil",
+    PenType.MARKER to "Marker",
+    PenType.CALLIGRAPHY to "Calligraphy",
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,9 +130,11 @@ fun EditorScreen(
     }
     val pageList = pages.orEmpty()
 
-    // Ensure at least one page exists before showing the editor.
-    LaunchedEffect(pageList) {
-        if (pages != null && pageList.isEmpty()) {
+    // Ensure at least one page exists before showing the editor. Keyed on the nullable
+    // [pages] state: null -> first emission is a state change even when both lists are
+    // structurally empty, so an empty new notebook always gets its first page.
+    LaunchedEffect(pages) {
+        if (pages != null && pages.orEmpty().isEmpty()) {
             repository.createPage(notebookId)
         }
     }
@@ -131,9 +142,10 @@ fun EditorScreen(
     // Selected page follows the page rail; falls back to the first page when the current
     // selection disappears (e.g. after deletion).
     var selectedPageId by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(pageList) {
-        if (selectedPageId == null || pageList.none { it.id == selectedPageId }) {
-            selectedPageId = pageList.firstOrNull()?.id
+    LaunchedEffect(pages) {
+        val list = pages.orEmpty()
+        if (selectedPageId == null || list.none { it.id == selectedPageId }) {
+            selectedPageId = list.firstOrNull()?.id
         }
     }
     val pageId = selectedPageId
@@ -227,6 +239,14 @@ fun EditorScreen(
                 },
                 onWidth = { w ->
                     vm.setPenStyle(penStyle.copy(widthMm = w))
+                },
+                onPenType = { type ->
+                    vm.setPenStyle(
+                        penStyle.copy(
+                            type = type,
+                            opacity = if (type == PenType.HIGHLIGHTER) 0.4f else 1f,
+                        )
+                    )
                 },
                 onEraserSize = { vm.setEraserSize(it) },
                 onSelectAll = { vm.selectAll() },
@@ -417,6 +437,7 @@ private fun EditorToolbar(
     onTool: (Tool) -> Unit,
     onColor: (Long) -> Unit,
     onWidth: (Float) -> Unit,
+    onPenType: (PenType) -> Unit,
     onEraserSize: (Float) -> Unit,
     onSelectAll: () -> Unit,
     onDeleteSelection: () -> Unit,
@@ -471,6 +492,37 @@ private fun EditorToolbar(
             // Context row: colors + thickness (or eraser size).
             when (tool) {
                 Tool.PEN, Tool.HIGHLIGHTER -> {
+                    if (tool == Tool.PEN) {
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text("Pen", style = MaterialTheme.typography.labelMedium)
+                            PEN_TYPES.forEach { (type, label) ->
+                                val selected = penStyle.type == type
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (selected) MaterialTheme.colorScheme.primaryContainer
+                                            else MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (selected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.outlineVariant,
+                                            shape = RoundedCornerShape(6.dp),
+                                        )
+                                        .clickable { onPenType(type) }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                ) {
+                                    Text(label, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         verticalAlignment = Alignment.CenterVertically,

@@ -75,12 +75,12 @@ class InkRenderer {
     private fun fountainWidth(stroke: Stroke): (Int, FloatArray, Int) -> Float {
         val base = stroke.style.widthMm
         val pts = stroke.pointsPacked
-        return { index, _, _ ->
-            if (index <= 0 || index >= pts.size - 1) {
+        return { index, _, n ->
+            if (index <= 0 || index >= n - 1) {
                 base
             } else {
-                val dx = pts[index] - pts[index - 2]
-                val dy = pts[index + 1] - pts[index - 1]
+                val dx = pts[index * 2] - pts[index * 2 - 2]
+                val dy = pts[index * 2 + 1] - pts[index * 2 - 1]
                 val speed = hypot(dx, dy)
                 val factor = (0.65f + 0.7f * (speed / 6f)).coerceIn(0.45f, 1.4f)
                 base * factor
@@ -94,12 +94,12 @@ class InkRenderer {
         val nibDirX = cos(nibAngleRad).toFloat()
         val nibDirY = sin(nibAngleRad).toFloat()
         val pts = stroke.pointsPacked
-        return { index, _, _ ->
-            if (index <= 0 || index >= pts.size - 1) {
+        return { index, _, n ->
+            if (index <= 0 || index >= n - 1) {
                 base
             } else {
-                val dirX = pts[index] - pts[index - 2]
-                val dirY = pts[index + 1] - pts[index - 1]
+                val dirX = pts[index * 2] - pts[index * 2 - 2]
+                val dirY = pts[index * 2 + 1] - pts[index * 2 - 1]
                 val len = hypot(dirX, dirY)
                 if (len < 0.0001f) {
                     base * 0.2f

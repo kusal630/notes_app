@@ -61,9 +61,10 @@ class InkCanvasView @JvmOverloads constructor(
     var strokes: List<Stroke> = emptyList()
         set(value) {
             if (field !== value) {
+                val pureAppend = value.size == field.size + 1 && value.dropLast(1) == field
                 field = value
                 strokesVersion++
-                rebuildPending = true
+                if (!pureAppend) rebuildPending = true
                 if (value.isNotEmpty()) {
                     strokeIdCounter = maxOf(strokeIdCounter, value.maxOf { it.id })
                 }
@@ -130,6 +131,10 @@ class InkCanvasView @JvmOverloads constructor(
     private var layerOffsetY = 0f
     private var strokesVersion = 0
     private var rebuildPending = true
+    /** Number of strokes already baked into the cached layer. */
+    private var renderedCount = 0
+    /** [strokesVersion] at the time the cached layer was last written. */
+    private var renderedVersion = -1
 
     // --- gesture state ---
     private data class GestureStart(
@@ -234,6 +239,22 @@ class InkCanvasView @JvmOverloads constructor(
 
                     com.premiumnotes.input.InputAction.MOVE -> {
                         val builder = strokeBuilder ?: return
+                        // Auto-scroll (page scrolling): keep the pen away from the top and
+                        // bottom viewport edges so writing flows like a real notebook instead
+                        // of forcing the user to create a new page. The world point for THIS
+                        // event is computed before scrolling, so strokes stay continuous.
+                        val h = height.toFloat()
+                        val margin = 150f
+                        val penY = contact.contact.y
+                        val shiftY = when {
+                            penY > h - margin -> penY - (h - margin)
+                            penY < margin -> penY - margin
+                            else -> 0f
+                        }
+                        if (shiftY != 0f) {
+                            offsetY -= shiftY
+                            listener?.onViewportChanged(zoom, offsetX, offsetY)
+                        }
                         val worldX = screenToWorldX(contact.contact.x)
                         val worldY = screenToWorldY(contact.contact.y)
                         if (builder.onMove(worldX, worldY, contact.contact.eventTimeNanos)) {
@@ -415,8 +436,8 @@ class InkCanvasView @JvmOverloads constructor(
 
         activePaint.color = (penStyle.colorArgb and 0xFFFFFF).toInt() or
             ((penStyle.opacity.coerceIn(0f, 1f) * 255).toInt() shl 24)
-        val widthPx = penStyle.widthMm * scale
-        activePaint.strokeWidth = if (widthPx < 0.5f) 0.5f else widthPx
+        // Stroke width in world units (mm); the canvas transform converts it to pixels.
+        activePaint.strokeWidth = penStyle.widthMm.coerceAtLeast(0.2f)
     }
 
     private fun rebuildCommittedLayer() {
@@ -425,27 +446,41 @@ class InkCanvasView @JvmOverloads constructor(
         val bmp = committedLayer
         if (bmp == null || bmp.width != w || bmp.height != h) {
             committedLayer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            renderedCount = 0
         }
         val layer = committedLayer ?: return
-        layer.eraseColor(0x00000000)
-
         val c = Canvas(layer)
         c.save()
         c.translate(offsetX, offsetY)
         c.scale(scale, scale)
-        // Z-order: highlighters always render below ink so a later highlight never
-        // obscures handwriting (matches paper behavior). Both passes keep their
-        // relative chronological order.
-        val highlighters = ArrayList<Stroke>()
-        val ink = ArrayList<Stroke>()
-        for (stroke in strokes) {
-            if (stroke.style.type == com.premiumnotes.model.PenType.HIGHLIGHTER) highlighters += stroke
-            else ink += stroke
+
+        // Fast path: viewport transform unchanged and exactly one ink stroke appended
+        // since the layer was last written. Ink always draws above highlighters, so
+        // appending ink directly is correct; anything else forces a full z-ordered pass.
+        val transformUnchanged = scale == layerScale && offsetX == layerOffsetX && offsetY == layerOffsetY
+        val singleAppend = !rebuildPending && transformUnchanged &&
+            strokes.size == renderedCount + 1 && strokesVersion == renderedVersion + 1 &&
+            strokes.last().style.type != com.premiumnotes.model.PenType.HIGHLIGHTER
+        if (singleAppend) {
+            renderer.drawStroke(c, strokes.last(), 1f)
+        } else {
+            layer.eraseColor(0x00000000)
+            // Z-order: highlighters always render below ink so a later highlight never
+            // obscures handwriting (matches paper behavior). Both passes keep their
+            // relative chronological order.
+            val highlighters = ArrayList<Stroke>()
+            val ink = ArrayList<Stroke>()
+            for (stroke in strokes) {
+                if (stroke.style.type == com.premiumnotes.model.PenType.HIGHLIGHTER) highlighters += stroke
+                else ink += stroke
+            }
+            for (stroke in highlighters) renderer.drawStroke(c, stroke, 1f)
+            for (stroke in ink) renderer.drawStroke(c, stroke, 1f)
         }
-        for (stroke in highlighters) renderer.drawStroke(c, stroke, 1f)
-        for (stroke in ink) renderer.drawStroke(c, stroke, 1f)
         c.restore()
 
+        renderedCount = strokes.size
+        renderedVersion = this.strokesVersion
         layerScale = scale
         layerOffsetX = offsetX
         layerOffsetY = offsetY
@@ -522,10 +557,15 @@ class InkCanvasView @JvmOverloads constructor(
             canvas.drawRect(lasso, lassoStrokePaint)
         }
 
-        // Active stroke.
+        // Active stroke (world coordinates; rendered under the same viewport transform
+        // as the committed layer so the live stroke tracks the pen exactly).
         val builder = strokeBuilder
         if (builder != null && builder.livePoints.size > 1) {
+            canvas.save()
+            canvas.translate(offsetX, offsetY)
+            canvas.scale(scale, scale)
             canvas.drawPath(activePath, activePaint)
+            canvas.restore()
         }
     }
 
