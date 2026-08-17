@@ -135,18 +135,34 @@ class PalmRejectionEngine(
             }
 
             InputAction.POINTER_DOWN -> {
-                // A second contact landing while a stroke is locked is the start of a
-                // two-finger gesture (pan/zoom). Release the writing lock so the pair can
-                // drive navigation; a resting palm is classified PALM and never triggers
-                // this. The in-progress stroke is finalized by the view.
-                if (lock.isActive && frame.addedPointerId != null) {
-                    val added = classified.firstOrNull {
-                        it.contact.pointerId == frame.addedPointerId
+                // A new contact landed while another pointer is already down. Two cases:
+                //  1. No writing lock yet (e.g. a resting palm was the first contact). A
+                //     newly added WRITING-classified pointer (pen, or a finger with finger
+                //     writing enabled) must be able to claim the lock so it can start
+                //     drawing even though the palm is still resting.
+                //  2. A writing lock is active and a second contact joins. If that contact
+                //     is finger-sized it is the start of a two-finger gesture (pan/zoom):
+                //     release the writing lock so the pair can drive navigation. A resting
+                //     palm is classified PALM and never triggers this; the in-progress
+                //     stroke is finalized by the view.
+                val addedId = frame.addedPointerId
+                if (addedId != null) {
+                    val added = classified.firstOrNull { it.contact.pointerId == addedId }
+                    if (added != null) {
+                        if (!lock.isActive) {
+                            if (added.classification == ContactClassification.WRITING) {
+                                lock.tryClaim(
+                                    addedId,
+                                    nowNanos,
+                                    respectHoldoff = !currentSettings.enableFingerWriting,
+                                )
+                            }
+                        } else {
+                            val nonPalm = added.classification == ContactClassification.WRITING ||
+                                added.classification == ContactClassification.FINGER
+                            if (nonPalm) lock.reset(nowNanos)
+                        }
                     }
-                    val nonPalm = added != null &&
-                        (added.classification == ContactClassification.WRITING ||
-                            added.classification == ContactClassification.FINGER)
-                    if (nonPalm) lock.reset(nowNanos)
                 }
             }
 

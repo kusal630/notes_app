@@ -97,6 +97,14 @@ class InkCanvasView @JvmOverloads constructor(
 
     var penStyle: PenStyle = PenStyle()
     var tool: Tool = Tool.PEN
+        set(value) {
+            if (field != value) {
+                // Switching tools mid-stroke must commit the in-progress stroke rather
+                // than silently dropping it.
+                finalizeActiveStroke()
+                field = value
+            }
+        }
     var eraserSizeMm: Float = 6f
     var shapeKind: ShapeKind = ShapeKind.RECT
 
@@ -161,6 +169,8 @@ class InkCanvasView @JvmOverloads constructor(
 
     private var displayStrokes: List<CachedStroke> = emptyList()
     private var displayShapes: List<CachedShape> = emptyList()
+    private val displayStrokeById = HashMap<Long, CachedStroke>()
+    private val displayShapeById = HashMap<Long, CachedShape>()
     private var strokesVersion = 0
     private var shapesVersion = 0
 
@@ -237,6 +247,9 @@ class InkCanvasView @JvmOverloads constructor(
                         }
                         val stroke = b.onUp(endX, endY, endT)
                         if (stroke != null) {
+                            // Commit to the display list immediately (before the model
+                            // round-trip) so the stroke never vanishes between layers.
+                            commitStrokeGeometry(stroke)
                             listener?.onStrokeCommitted(stroke)
                         }
                         invalidate()
@@ -321,7 +334,7 @@ class InkCanvasView @JvmOverloads constructor(
      * Without this the in-progress stroke would be silently dropped by the canvas lock
      * being released for the gesture.
      */
-    private fun finalizeActiveStroke() {
+    fun finalizeActiveStroke() {
         val builder = strokeBuilder ?: return
         strokeBuilder = null
         writingPointerId = -1
@@ -331,7 +344,10 @@ class InkCanvasView @JvmOverloads constructor(
             return
         }
         val stroke = builder.onUp(last.x, last.y, 0L)
-        if (stroke != null) listener?.onStrokeCommitted(stroke)
+        if (stroke != null) {
+            commitStrokeGeometry(stroke)
+            listener?.onStrokeCommitted(stroke)
+        }
         invalidate()
     }
 
@@ -368,17 +384,19 @@ class InkCanvasView @JvmOverloads constructor(
                 shapeCurrentWorld = null
                 val size = hypot(current.x - start.x, current.y - start.y)
                 if (size >= 2f) {
-                    listener?.onShapeCommitted(
-                        ShapeObject(
-                            id = nextStrokeId(),
-                            kind = shapeKind,
-                            points = listOf(start, current),
-                            x = start.x,
-                            y = start.y,
-                            strokeWidthMm = penStyle.widthMm,
-                            colorArgb = penStyle.colorArgb,
-                        )
+                    val shape = ShapeObject(
+                        id = nextStrokeId(),
+                        kind = shapeKind,
+                        points = listOf(start, current),
+                        x = start.x,
+                        y = start.y,
+                        strokeWidthMm = penStyle.widthMm,
+                        colorArgb = penStyle.colorArgb,
                     )
+                    // Synchronous commit to the display list so the shape appears on the
+                    // next frame instead of after the model round-trip.
+                    commitShapeGeometry(shape)
+                    listener?.onShapeCommitted(shape)
                 }
                 invalidate()
             }
@@ -387,12 +405,18 @@ class InkCanvasView @JvmOverloads constructor(
 
     // --- selection ---
 
-    /** Best pointer for selection: locked pen, else a gesture finger, else the first contact. */
+    /** Best pointer for selection: locked pen, else a gesture finger, else the first
+     *  non-palm contact. Never falls back to a palm/rejected contact as the driver. */
     private fun primaryContact(classified: ClassifiedFrame): com.premiumnotes.input.ClassifiedContact? {
         val id = classified.activeWritingPointerId
             ?: classified.gesturePointerIds.firstOrNull()
-            ?: classified.contacts.firstOrNull()?.contact?.pointerId
-        return id?.let { classified.contactFor(it) }
+            ?: classified.contacts.firstOrNull {
+                it.classification == com.premiumnotes.input.ContactClassification.WRITING ||
+                    it.classification == com.premiumnotes.input.ContactClassification.FINGER ||
+                    it.classification == com.premiumnotes.input.ContactClassification.ERASER
+            }?.contact?.pointerId
+            ?: return null
+        return classified.contactFor(id)
     }
 
     private fun handleSelection(input: InputFrame, classified: ClassifiedFrame) {
@@ -480,14 +504,22 @@ class InkCanvasView @JvmOverloads constructor(
         }
         if (id == -1) return null
         val contact = classified.contactFor(id)
-        if (contact == null ||
-            contact.classification == com.premiumnotes.input.ContactClassification.PALM ||
-            contact.classification == com.premiumnotes.input.ContactClassification.REJECTED
-        ) {
+        // Once a pointer is picked for this erase gesture, stick with it until it
+        // actually lifts. A momentary reclassification (borderline contact flickering
+        // between WRITING and PALM) must not drop frames from a scrub; only a missing
+        // contact ends the sticky tracking. This mirrors the writing-lock stickiness.
+        if (contact == null) {
             eraserPointerId = -1
             return null
         }
-        eraserPointerId = id
+        if (eraserPointerId == -1) {
+            if (contact.classification == com.premiumnotes.input.ContactClassification.PALM ||
+                contact.classification == com.premiumnotes.input.ContactClassification.REJECTED
+            ) {
+                return null
+            }
+            eraserPointerId = id
+        }
         return contact
     }
 
@@ -604,26 +636,62 @@ class InkCanvasView @JvmOverloads constructor(
     }
 
     private fun appendStrokeGeometry(stroke: Stroke) {
-        displayStrokes = displayStrokes + buildStrokeGeometry(stroke)
+        // Idempotent: a stroke may already be in the display list because the canvas
+        // committed it synchronously on pen-up (commitStrokeGeometry) before the
+        // state round-trip delivered the updated list. Appending twice would double-draw
+        // translucent highlighters.
+        if (displayStrokeById.containsKey(stroke.id)) return
+        val item = buildStrokeGeometry(stroke)
+        displayStrokes = displayStrokes + item
+        displayStrokeById[stroke.id] = item
     }
 
     private fun rebuildStrokeGeometry() {
         val items = ArrayList<CachedStroke>(strokes.size)
-        for (stroke in strokes) items += buildStrokeGeometry(stroke)
+        displayStrokeById.clear()
+        for (stroke in strokes) {
+            val item = buildStrokeGeometry(stroke)
+            items += item
+            displayStrokeById[stroke.id] = item
+        }
         displayStrokes = items
+    }
+
+    /**
+     * Synchronously adds a just-committed stroke to the cached display list so it is
+     * visible on the very next draw pass. Without this there is a window between the
+     * live-stroke layer being cleared and the committed list arriving through the
+     * Compose state flow in which the stroke renders as invisible — the "ink disappears
+     * for a moment and re-renders" glitch.
+     */
+    private fun commitStrokeGeometry(stroke: Stroke) {
+        appendStrokeGeometry(stroke)
     }
 
     private fun buildShapeGeometry(shape: ShapeObject): CachedShape =
         CachedShape(ShapeRenderer.buildPath(shape), ShapeRenderer.outlinePaint(shape))
 
     private fun appendShapeGeometry(shape: ShapeObject) {
-        displayShapes = displayShapes + buildShapeGeometry(shape)
+        if (displayShapeById.containsKey(shape.id)) return
+        val item = buildShapeGeometry(shape)
+        displayShapes = displayShapes + item
+        displayShapeById[shape.id] = item
     }
 
     private fun rebuildShapeGeometry() {
         val items = ArrayList<CachedShape>(shapes.size)
-        for (shape in shapes) items += buildShapeGeometry(shape)
+        displayShapeById.clear()
+        for (shape in shapes) {
+            val item = buildShapeGeometry(shape)
+            items += item
+            displayShapeById[shape.id] = item
+        }
         displayShapes = items
+    }
+
+    /** Synchronous variant of [appendShapeGeometry] used at shape commit time. */
+    private fun commitShapeGeometry(shape: ShapeObject) {
+        appendShapeGeometry(shape)
     }
 
     private fun drawCommittedStroke(canvas: Canvas, item: CachedStroke) {
@@ -695,7 +763,9 @@ class InkCanvasView @JvmOverloads constructor(
         val builder = strokeBuilder
         if (builder != null && builder.livePoints.size > 1) {
             val pts = builder.livePoints
-            val live = Stroke(id = 0L, style = penStyle, pointsPacked = Stroke.pack(pts))
+            // Use the style captured at stroke start: the live stroke must always match
+            // what gets committed on pen-up, even if the toolbar changed mid-stroke.
+            val live = Stroke(id = 0L, style = builder.style, pointsPacked = Stroke.pack(pts))
             renderer.drawStroke(canvas, live, 1f)
         }
         canvas.restore()

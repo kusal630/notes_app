@@ -1,8 +1,10 @@
 package com.premiumnotes.editor
 
+import com.premiumnotes.model.ImageObject
 import com.premiumnotes.model.PageContent
 import com.premiumnotes.model.ShapeObject
 import com.premiumnotes.model.Stroke
+import com.premiumnotes.model.TextObject
 
 /**
  * Command-based undo/redo (requirement 14). Each command knows how to apply itself to a
@@ -62,26 +64,93 @@ class RemoveShapeCommand(val shape: ShapeObject) : EditorCommand {
 }
 
 /**
- * Batch transform (move/scale/rotate) of a set of strokes. Keeps the original
- * geometry so undo is exact; coalesces across live drag updates so a whole drag
- * becomes a single undo step.
+ * Batch transform (move/scale/rotate) of a set of strokes AND shapes. Keeps the
+ * original geometry so undo is exact; coalesces across live drag/resize updates so a
+ * whole drag or resize becomes a single undo step.
  */
-class TransformStrokesCommand(
-    val originals: List<Stroke>,
-    val transformed: List<Stroke>,
+class TransformSelectionCommand(
+    val originalStrokes: List<Stroke>,
+    val transformedStrokes: List<Stroke>,
+    val originalShapes: List<ShapeObject>,
+    val transformedShapes: List<ShapeObject>,
 ) : EditorCommand {
-    private val ids = originals.mapTo(HashSet()) { it.id }
-
-    override fun apply(content: PageContent): PageContent {
-        val byId = HashMap<Long, Stroke>()
-        for (s in transformed) byId[s.id] = s
-        return content.copy(strokes = content.strokes.map { byId[it.id] ?: it })
+    private val ids: Set<Long> = buildSet {
+        originalStrokes.forEach { add(it.id) }
+        originalShapes.forEach { add(it.id) }
     }
 
-    override fun invert() = TransformStrokesCommand(transformed, originals)
+    override fun apply(content: PageContent): PageContent {
+        val strokeById = HashMap<Long, Stroke>()
+        for (s in transformedStrokes) strokeById[s.id] = s
+        val shapeById = HashMap<Long, ShapeObject>()
+        for (s in transformedShapes) shapeById[s.id] = s
+        return content.copy(
+            strokes = content.strokes.map { strokeById[it.id] ?: it },
+            shapeObjects = content.shapeObjects.map { shapeById[it.id] ?: it },
+        )
+    }
+
+    override fun invert() = TransformSelectionCommand(
+        transformedStrokes, originalStrokes, transformedShapes, originalShapes,
+    )
 
     override fun canCoalesceWith(other: EditorCommand): Boolean =
-        other is TransformStrokesCommand && other.ids == ids
+        other is TransformSelectionCommand && other.ids == ids
+}
+
+/** Removes any combination of object types at once; re-adds them on undo. */
+class RemoveObjectsCommand(
+    val strokes: List<Stroke> = emptyList(),
+    val shapes: List<ShapeObject> = emptyList(),
+    val textObjects: List<TextObject> = emptyList(),
+    val imageObjects: List<ImageObject> = emptyList(),
+) : EditorCommand {
+    private val strokeIds = strokes.mapTo(HashSet()) { it.id }
+    private val shapeIds = shapes.mapTo(HashSet()) { it.id }
+    private val textIds = textObjects.mapTo(HashSet()) { it.id }
+    private val imageIds = imageObjects.mapTo(HashSet()) { it.id }
+
+    override fun apply(content: PageContent): PageContent = content.copy(
+        strokes = content.strokes.filterNot { it.id in strokeIds },
+        shapeObjects = content.shapeObjects.filterNot { it.id in shapeIds },
+        textObjects = content.textObjects.filterNot { it.id in textIds },
+        imageObjects = content.imageObjects.filterNot { it.id in imageIds },
+    )
+
+    override fun invert() = AddObjectsCommand(strokes, shapes, textObjects, imageObjects)
+}
+
+class AddObjectsCommand(
+    val strokes: List<Stroke> = emptyList(),
+    val shapes: List<ShapeObject> = emptyList(),
+    val textObjects: List<TextObject> = emptyList(),
+    val imageObjects: List<ImageObject> = emptyList(),
+) : EditorCommand {
+    override fun apply(content: PageContent): PageContent = content.copy(
+        strokes = content.strokes + strokes,
+        shapeObjects = content.shapeObjects + shapes,
+        textObjects = content.textObjects + textObjects,
+        imageObjects = content.imageObjects + imageObjects,
+    )
+
+    override fun invert() = RemoveObjectsCommand(strokes, shapes, textObjects, imageObjects)
+}
+
+/** Adds several shapes at once (duplication, undo of a batch erase). */
+class AddShapesCommand(val shapes: List<ShapeObject>) : EditorCommand {
+    override fun apply(content: PageContent) =
+        content.copy(shapeObjects = content.shapeObjects + shapes)
+
+    override fun invert() = RemoveShapesCommand(shapes)
+}
+
+class RemoveShapesCommand(val shapes: List<ShapeObject>) : EditorCommand {
+    override fun apply(content: PageContent): PageContent {
+        val ids = shapes.mapTo(HashSet()) { it.id }
+        return content.copy(shapeObjects = content.shapeObjects.filterNot { ids.contains(it.id) })
+    }
+
+    override fun invert() = AddShapesCommand(shapes)
 }
 
 /**

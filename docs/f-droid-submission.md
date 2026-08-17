@@ -68,7 +68,7 @@ Builds:
   - versionName: 1.0.0
     versionCode: 1
     commit: v1.0.0
-    subdir: app
+    subdir: .
     gradle:
       - yes
 

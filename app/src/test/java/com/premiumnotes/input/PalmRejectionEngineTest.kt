@@ -177,4 +177,115 @@ class PalmRejectionEngineTest {
         assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
         assertTrue(out.gesturePointerIds.isEmpty())
     }
+
+    // --- Phase 1: palm resting FIRST, then a writing contact lands elsewhere ----------
+
+    @Test
+    fun penTouchesWhilePalmAlreadyRestingClaimsWritingLock() {
+        val e = engine()
+        // Scenario (a): palm rests alone first — correctly rejected, no writing lock.
+        val palmFirst = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.palm(2, timeMs = 0L)), added = 2)
+        )
+        assertNull(palmFirst.activeWritingPointerId)
+        assertEquals(ContactClassification.PALM, palmFirst.contactFor(2)?.classification)
+
+        // Scenario (b): pen touches elsewhere while the palm is still resting. The newly
+        // added WRITING pointer must claim the writing lock on POINTER_DOWN.
+        val palm = TestTouchFactory.palm(2, x = 500f, y = 700f, timeMs = 20L)
+        val pen = TestTouchFactory.pen(pointerId = 0, x = 120f, y = 110f, timeMs = 20L)
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm, pen), added = 0)
+        )
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+        assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
+        // The resting palm must never enable gestures while writing is locked.
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    @Test
+    fun fingerTouchesWhilePalmAlreadyRestingClaimsWritingLock() {
+        val e = PalmRejectionEngine(testCapabilities()) {
+            testSettings(mode = PalmRejectionMode.WRITING).apply { enableFingerWriting = true }
+        }
+        e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.palm(2, timeMs = 0L)), added = 2)
+        )
+        // Scenario (c): a bare finger touches elsewhere while the palm rests.
+        val palm = TestTouchFactory.palm(2, x = 500f, y = 700f, timeMs = 20L)
+        val finger = TestTouchFactory.fingertip(pointerId = 0, x = 220f, y = 220f, timeMs = 20L)
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm, finger), added = 0)
+        )
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    // --- Phase 1: no mid-stroke flip-flop ----------------------------------------------
+
+    @Test
+    fun palmRapidOnOffWhileWritingKeepsLockContinuous() {
+        val e = engine()
+        e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+
+        // Palm lands (POINTER_DOWN): lock persists.
+        val withPalm = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 20L,
+                listOf(TestTouchFactory.pen(0, x = 120f, y = 110f, timeMs = 20L), TestTouchFactory.palm(2, timeMs = 20L)),
+                added = 2,
+            )
+        )
+        assertEquals(0, withPalm.activeWritingPointerId)
+
+        // Palm lifts (POINTER_UP): lock stays on the pen.
+        val palmLift = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_UP, 30L, listOf(TestTouchFactory.pen(0, x = 140f, y = 130f, timeMs = 30L)), lifted = 2)
+        )
+        assertEquals(0, palmLift.activeWritingPointerId)
+
+        // Palm re-lands while pen still down: lock stays.
+        val palmAgain = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 40L,
+                listOf(TestTouchFactory.pen(0, x = 160f, y = 150f, timeMs = 40L), TestTouchFactory.palm(2, x = 480f, y = 700f, timeMs = 40L)),
+                added = 2,
+            )
+        )
+        assertEquals(0, palmAgain.activeWritingPointerId)
+
+        // Pen continues writing with both contacts down: lock persists every frame.
+        val move = e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 50L,
+                listOf(TestTouchFactory.pen(0, x = 200f, y = 190f, timeMs = 50L), TestTouchFactory.palm(2, x = 460f, y = 710f, timeMs = 50L)),
+            )
+        )
+        assertEquals(0, move.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, move.contactFor(0)?.classification)
+        assertTrue(move.gesturePointerIds.isEmpty())
+    }
+
+    @Test
+    fun borderlinePenReclassificationNeverDropsLockMidStroke() {
+        val e = engine()
+        // Pen establishes the writing lock normally.
+        e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+
+        // A later frame reports the SAME pointer with a degenerate/palm-sized contact
+        // (e.g. the digitizer briefly saturates). The sticky lock must not flip-flop:
+        // the pointer stays the active writer and no gesture is granted.
+        val bloatedPen = TestTouchFactory.palm(0, x = 140f, y = 130f, timeMs = 20L)
+        val out = e.process(TestTouchFactory.frame(InputAction.MOVE, 20L, listOf(bloatedPen)))
+        assertEquals(0, out.activeWritingPointerId)
+        assertTrue(out.gesturePointerIds.isEmpty())
+
+        // And the pen keeps writing on the next normal frame.
+        val next = e.process(
+            TestTouchFactory.frame(InputAction.MOVE, 30L, listOf(TestTouchFactory.pen(0, x = 170f, y = 160f, timeMs = 30L)))
+        )
+        assertEquals(0, next.activeWritingPointerId)
+    }
 }

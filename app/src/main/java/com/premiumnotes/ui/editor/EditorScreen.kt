@@ -54,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -289,28 +290,33 @@ fun EditorScreen(
 
             // Canvas fills the whole screen so you can write edge to edge; the page rail
             // is a hideable overlay toggled from the top bar.
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    InkCanvasView(ctx).also { view ->
-                        view.capabilities = capabilities
-                        view.engine = engine
+            // Keying by pageId recreates the view on page switch so the engine resets and
+            // any in-progress stroke is finalized onto the page it was drawn on.
+            key(pageId) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        InkCanvasView(ctx).also { view ->
+                            view.capabilities = capabilities
+                            view.engine = engine
+                            view.listener = vm.canvasListener
+                            engine.reset()
+                        }
+                    },
+                    update = { view ->
+                        view.strokes = content.strokes
+                        view.shapes = content.shapeObjects
+                        view.penStyle = penStyle
+                        view.tool = tool
+                        view.eraserSizeMm = eraserSize
+                        view.shapeKind = shapeKind
+                        view.background = pageBackground
+                        view.selectionBoundsMm = editorState!!.selectionBoundsMm
                         view.listener = vm.canvasListener
-                        engine.reset()
-                    }
-                },
-                update = { view ->
-                    view.strokes = content.strokes
-                    view.shapes = content.shapeObjects
-                    view.penStyle = penStyle
-                    view.tool = tool
-                    view.eraserSizeMm = eraserSize
-                    view.shapeKind = shapeKind
-                    view.background = pageBackground
-                    view.selectionBoundsMm = editorState!!.selectionBoundsMm
-                    view.listener = vm.canvasListener
-                }
-            )
+                    },
+                    onRelease = { view -> view.finalizeActiveStroke() },
+                )
+            }
 
             if (showRail) {
                 Row(Modifier.fillMaxHeight()) {

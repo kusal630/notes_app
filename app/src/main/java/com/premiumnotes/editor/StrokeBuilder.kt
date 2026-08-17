@@ -16,7 +16,7 @@ import kotlin.math.hypot
  * point smoothing → stroke construction" stage of the pipeline.
  */
 class StrokeBuilder(
-    private val style: PenStyle,
+    val style: PenStyle,
     private val id: Long,
     private val deadZoneMm: Float = 0.5f,
 ) {
