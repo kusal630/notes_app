@@ -18,7 +18,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -68,8 +70,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -619,33 +626,44 @@ private fun PageRail(
 ) {
     Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(pages, key = { it.id }) { page ->
-                    if (compact) {
-                        val isCurrent = page.id == currentPageId
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(
-                                    if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                    else MaterialTheme.colorScheme.surface
-                                )
-                                .border(
-                                    width = if (isCurrent) 2.dp else 1.dp,
-                                    color = if (isCurrent) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.outlineVariant,
-                                    shape = RoundedCornerShape(6.dp),
-                                )
-                                .clickable { onSelectPage(page.id) },
-                        )
-                    } else {
-                        PageThumbnail(page, selected = page.id == currentPageId, onClick = { onSelectPage(page.id) })
+            // A thin, draggable scroll bar over the page list: with many pages you can see
+            // where you are and jump. Drawn in-house (not the foundation Scrollbar API,
+            // which is absent from the resolved foundation 1.7.6 artifacts).
+            val listState = rememberLazyListState()
+            Box(Modifier.weight(1f)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(pages, key = { it.id }) { page ->
+                        if (compact) {
+                            val isCurrent = page.id == currentPageId
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(
+                                        if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                        else MaterialTheme.colorScheme.surface
+                                    )
+                                    .border(
+                                        width = if (isCurrent) 2.dp else 1.dp,
+                                        color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                        shape = RoundedCornerShape(6.dp),
+                                    )
+                                    .clickable { onSelectPage(page.id) },
+                            )
+                        } else {
+                            PageThumbnail(page, selected = page.id == currentPageId, onClick = { onSelectPage(page.id) })
+                        }
                     }
                 }
+                PageRailScrollbar(
+                    listState = listState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                )
             }
             if (compact) {
                 IconButton(
@@ -693,6 +711,91 @@ private fun PageThumbnail(page: PageSummary, selected: Boolean, onClick: () -> U
             maxLines = 1,
         )
     }
+}
+
+/**
+ * A thin overlay scroll bar for the page rail's [LazyColumn]. Appears only when the list
+ * overflows; you can drag anywhere on the track to jump. Knob position/size come from the
+ * list's layout info (the rail's items are uniform, so item counts map cleanly to a ratio).
+ * Drawn in-house: the foundation `Scrollbar` API is absent from the resolved 1.7.6 artifacts.
+ */
+@Composable
+private fun PageRailScrollbar(
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val thumbColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+    val trackWidth = 4.dp
+
+    val totalItems = listState.layoutInfo.totalItemsCount
+    val visibleItems = listState.layoutInfo.visibleItemsInfo.size
+    val firstIndex = listState.firstVisibleItemIndex
+    val scrollable = totalItems > visibleItems
+
+    // Uniform items -> the visible/total item ratio equals the visible/total height ratio.
+    val knobRatio = remember(totalItems, visibleItems) {
+        if (totalItems == 0) 1f else (visibleItems.toFloat() / totalItems).coerceIn(0.06f, 1f)
+    }
+    val scrollFraction = remember(totalItems, visibleItems, firstIndex) {
+        if (totalItems <= visibleItems) 0f
+        else (firstIndex.toFloat() / (totalItems - visibleItems)).coerceIn(0f, 1f)
+    }
+
+    Box(
+        modifier = modifier
+            .width(14.dp)
+            .then(
+                if (scrollable) {
+                    Modifier.pointerInput(listState, totalItems, visibleItems, knobRatio) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                scope.launch {
+                                    scrollListToFraction(listState, offset.y, size.height.toFloat(), knobRatio)
+                                }
+                            },
+                            onDrag = { change, _ ->
+                                change.consume()
+                                scope.launch {
+                                    scrollListToFraction(listState, change.position.y, size.height.toFloat(), knobRatio)
+                                }
+                            },
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
+            .drawBehind {
+                if (!scrollable) return@drawBehind
+                val trackHeight = size.height
+                val knobHeight = (trackHeight * knobRatio).coerceAtLeast(32f)
+                val maxTop = trackHeight - knobHeight
+                val top = (scrollFraction * maxTop).coerceIn(0f, maxTop)
+                val halfWidth = trackWidth.toPx() / 2f
+                drawRoundRect(
+                    color = thumbColor,
+                    topLeft = Offset(size.width - trackWidth.toPx(), top),
+                    size = Size(trackWidth.toPx(), knobHeight),
+                    cornerRadius = CornerRadius(halfWidth, halfWidth),
+                )
+            },
+    )
+}
+
+private suspend fun scrollListToFraction(
+    listState: LazyListState,
+    dragY: Float,
+    trackHeightPx: Float,
+    knobRatio: Float,
+) {
+    val total = listState.layoutInfo.totalItemsCount
+    val visible = listState.layoutInfo.visibleItemsInfo.size
+    if (total == 0 || total <= visible) return
+    val knobHeight = (trackHeightPx * knobRatio).coerceAtLeast(32f)
+    val travelRange = (trackHeightPx - knobHeight).coerceAtLeast(1f)
+    val fraction = ((dragY - knobHeight / 2f) / travelRange).coerceIn(0f, 1f)
+    listState.scrollToItem((fraction * (total - visible)).toInt())
 }
 
 @Composable
