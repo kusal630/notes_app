@@ -61,6 +61,9 @@ class InkCanvasView @JvmOverloads constructor(
         fun onSelectionDragStart(worldX: Float, worldY: Float)
         fun onSelectionDragTo(worldX: Float, worldY: Float)
         fun onSelectionDragEnd()
+        fun onSelectionResizeStart(handleIndex: Int)
+        fun onSelectionResizeTo(worldX: Float, worldY: Float)
+        fun onSelectionResizeEnd()
     }
 
     lateinit var capabilities: InputCapabilities
@@ -108,6 +111,19 @@ class InkCanvasView @JvmOverloads constructor(
     var eraserSizeMm: Float = 6f
     var shapeKind: ShapeKind = ShapeKind.RECT
 
+    /**
+     * When on (settings toggle, default off), a tight scribble over the page erases the
+     * current gesture instead of writing. Never interferes with which touches are accepted
+     * — it only re-routes the current gesture after palm rejection already approved it.
+     */
+    var autoEraseEnabled: Boolean = false
+
+    private val writeEraseDetector = com.premiumnotes.input.WriteEraseDetector()
+
+    /** While true, the current gesture is being treated as erase even though the user
+     *  is on the pen tool (Feature 1 auto-detection fired mid-gesture). */
+    private var gestureEraseOverride = false
+
     /** World-space bounding box of the current selection, set by the UI. */
     var selectionBoundsMm: RectF? = null
 
@@ -122,8 +138,9 @@ class InkCanvasView @JvmOverloads constructor(
     private val renderer = InkRenderer()
 
     // --- selection state ---
-    private enum class SelectionMode { NONE, LASSO, MOVE }
+    private enum class SelectionMode { NONE, LASSO, MOVE, RESIZE }
     private var selectionMode = SelectionMode.NONE
+    private var resizeHandleIndex = -1
     private var lassoStartWorld = Point(0f, 0f)
     private var lassoCurrentWorld = Point(0f, 0f)
     private var dragAnchorWorld = Point(0f, 0f)
@@ -148,6 +165,17 @@ class InkCanvasView @JvmOverloads constructor(
         color = 0xFF2E5BFF.toInt()
         isAntiAlias = true
     }
+    private val selectionHandlePaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = 0xFFFFFFFF.toInt()
+        isAntiAlias = true
+    }
+    private val selectionHandleOutlinePaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = 0xFF2E5BFF.toInt()
+        isAntiAlias = true
+    }
 
     // --- active stroke ---
     private var strokeBuilder: StrokeBuilder? = null
@@ -163,9 +191,15 @@ class InkCanvasView @JvmOverloads constructor(
         val grainAlpha: Int,
         val grainDx: Float,
         val grainDy: Float,
+        val points: FloatArray,
     )
 
-    private data class CachedShape(val path: Path, val paint: Paint)
+    private data class CachedShape(
+        val path: Path,
+        val paint: Paint,
+        val corner0: Point,
+        val corner1: Point,
+    )
 
     private var displayStrokes: List<CachedStroke> = emptyList()
     private var displayShapes: List<CachedShape> = emptyList()
@@ -197,6 +231,14 @@ class InkCanvasView @JvmOverloads constructor(
         val input = MotionEventParser.parse(event)
         val classified = engine.process(input)
 
+        // A new gesture always starts clean: clear any erase-override from a previous
+        // gesture and reset the write/erase detector.
+        if (input.action == com.premiumnotes.input.InputAction.DOWN ||
+            input.action == com.premiumnotes.input.InputAction.POINTER_DOWN
+        ) {
+            gestureEraseOverride = false
+        }
+
         // Two-finger gestures take priority over the active tool so the page can be
         // panned/zoomed while a pen is selected — otherwise the user gets stuck at the
         // bottom of a scrolled page with no way back up. This also covers the moment a
@@ -207,11 +249,18 @@ class InkCanvasView @JvmOverloads constructor(
         }
 
         when {
+            gestureEraseOverride -> handleEraser(input, classified)
             tool == Tool.ERASER -> handleEraser(input, classified)
             tool == Tool.PEN || tool == Tool.HIGHLIGHTER -> handleStroke(input, classified)
             tool == Tool.SELECT -> handleSelection(input, classified)
             tool == Tool.SHAPES -> handleShapes(input, classified)
             else -> handleNavigation(input, classified)
+        }
+        if (input.action == com.premiumnotes.input.InputAction.UP ||
+            input.action == com.premiumnotes.input.InputAction.POINTER_UP ||
+            input.action == com.premiumnotes.input.InputAction.CANCEL
+        ) {
+            gestureEraseOverride = false
         }
         return true
     }
@@ -272,11 +321,17 @@ class InkCanvasView @JvmOverloads constructor(
                     com.premiumnotes.input.InputAction.POINTER_DOWN,
                     -> {
                         if (strokeBuilder == null) {
+                            val worldX = screenToWorldX(contact.contact.x)
+                            val worldY = screenToWorldY(contact.contact.y)
+                            if (autoEraseEnabled) {
+                                writeEraseDetector.reset(hitTestInk(worldX, worldY))
+                                writeEraseDetector.addSample(worldX, worldY, contact.contact.eventTimeNanos)
+                            }
                             val builder = StrokeBuilder(
                                 style = penStyle,
                                 id = nextStrokeId(),
                             )
-                            builder.onDown(screenToWorldX(contact.contact.x), screenToWorldY(contact.contact.y))
+                            builder.onDown(worldX, worldY)
                             strokeBuilder = builder
                             writingPointerId = writingId
                         }
@@ -308,15 +363,36 @@ class InkCanvasView @JvmOverloads constructor(
                         var changed = false
                         for (h in input.history) {
                             if (h.pointerId != writingId) continue
-                            if (builder.onMove(screenToWorldX(h.x), screenToWorldY(h.y), h.eventTimeNanos)) {
+                            val hx = screenToWorldX(h.x)
+                            val hy = screenToWorldY(h.y)
+                            if (autoEraseEnabled) {
+                                writeEraseDetector.addSample(hx, hy, h.eventTimeNanos)
+                            }
+                            if (builder.onMove(hx, hy, h.eventTimeNanos)) {
                                 changed = true
                             }
+                        }
+                        if (autoEraseEnabled) {
+                            writeEraseDetector.addSample(worldX, worldY, contact.contact.eventTimeNanos)
                         }
                         if (builder.onMove(worldX, worldY, contact.contact.eventTimeNanos)) {
                             changed = true
                         }
                         if (changed) {
                             invalidate()
+                        }
+                        // Feature 1: a deliberate tight scribble flips THIS gesture to
+                        // erase. The partial stroke is committed (not lost), the erase
+                        // batch opens, and the eraser takes over for the rest of the
+                        // gesture (its sticky contact logic starts clean here).
+                        if (autoEraseEnabled &&
+                            writeEraseDetector.intent() == com.premiumnotes.input.WriteEraseDetector.Intent.ERASE
+                        ) {
+                            finalizeActiveStroke()
+                            gestureEraseOverride = true
+                            lastEraserPoint = Point(worldX, worldY)
+                            listener?.onEraseGestureBegin()
+                            listener?.onEraseAt(worldX, worldY, eraserSizeMm / 2f)
                         }
                     }
 
@@ -428,22 +504,32 @@ class InkCanvasView @JvmOverloads constructor(
             com.premiumnotes.input.InputAction.DOWN,
             com.premiumnotes.input.InputAction.POINTER_DOWN,
             -> {
-                val inside = selectionBoundsMm?.contains(wx, wy) == true
-                if (inside) {
-                    selectionMode = SelectionMode.MOVE
-                    dragAnchorWorld = Point(wx, wy)
-                    listener?.onSelectionDragStart(wx, wy)
+                // Feature 3: grabbing a handle resizes (corner = proportional, edge =
+                // single-axis); grabbing inside the selection moves it; otherwise lasso.
+                val handle = selectionBoundsMm?.let { hitTestSelectionHandle(it, wx, wy) } ?: -1
+                if (handle >= 0) {
+                    selectionMode = SelectionMode.RESIZE
+                    resizeHandleIndex = handle
+                    listener?.onSelectionResizeStart(handle)
                 } else {
-                    selectionMode = SelectionMode.LASSO
-                    lassoStartWorld = Point(wx, wy)
-                    lassoCurrentWorld = Point(wx, wy)
-                    invalidate()
+                    val inside = selectionBoundsMm?.contains(wx, wy) == true
+                    if (inside) {
+                        selectionMode = SelectionMode.MOVE
+                        dragAnchorWorld = Point(wx, wy)
+                        listener?.onSelectionDragStart(wx, wy)
+                    } else {
+                        selectionMode = SelectionMode.LASSO
+                        lassoStartWorld = Point(wx, wy)
+                        lassoCurrentWorld = Point(wx, wy)
+                        invalidate()
+                    }
                 }
             }
 
             com.premiumnotes.input.InputAction.MOVE -> {
                 when (selectionMode) {
                     SelectionMode.MOVE -> listener?.onSelectionDragTo(wx, wy)
+                    SelectionMode.RESIZE -> listener?.onSelectionResizeTo(wx, wy)
                     SelectionMode.LASSO -> {
                         lassoCurrentWorld = Point(wx, wy)
                         invalidate()
@@ -457,6 +543,10 @@ class InkCanvasView @JvmOverloads constructor(
             -> {
                 when (selectionMode) {
                     SelectionMode.MOVE -> listener?.onSelectionDragEnd()
+                    SelectionMode.RESIZE -> {
+                        listener?.onSelectionResizeEnd()
+                        resizeHandleIndex = -1
+                    }
                     SelectionMode.LASSO -> {
                         val left = kotlin.math.min(lassoStartWorld.x, lassoCurrentWorld.x)
                         val top = kotlin.math.min(lassoStartWorld.y, lassoCurrentWorld.y)
@@ -472,6 +562,7 @@ class InkCanvasView @JvmOverloads constructor(
 
             com.premiumnotes.input.InputAction.CANCEL -> {
                 selectionMode = SelectionMode.NONE
+                resizeHandleIndex = -1
                 invalidate()
             }
         }
@@ -484,6 +575,95 @@ class InkCanvasView @JvmOverloads constructor(
             rect.right * scale + offsetX,
             rect.bottom * scale + offsetY,
         )
+
+    /** The eight resize handles of a selection bounds: corners 0-3, edges 4-7 (world mm). */
+    private fun selectionHandleWorldPositions(bounds: RectF): Array<Point> {
+        val l = bounds.left; val t = bounds.top
+        val r = bounds.right; val b = bounds.bottom
+        val cx = (l + r) / 2f; val cy = (t + b) / 2f
+        return arrayOf(
+            Point(l, t), Point(r, t), Point(r, b), Point(l, b),
+            Point(cx, t), Point(r, cy), Point(cx, b), Point(l, cy),
+        )
+    }
+
+    /** Index of the resize handle within [touchRadiusPx] of the tap, or -1. */
+    private fun hitTestSelectionHandle(bounds: RectF, wx: Float, wy: Float): Int {
+        val radiusPx = resources.displayMetrics.density * 22f
+        val hx = wx * scale + offsetX
+        val hy = wy * scale + offsetY
+        val handles = selectionHandleWorldPositions(bounds)
+        for (i in handles.indices) {
+            val dx = handles[i].x * scale + offsetX - hx
+            val dy = handles[i].y * scale + offsetY - hy
+            if (dx * dx + dy * dy <= radiusPx * radiusPx) return i
+        }
+        return -1
+    }
+
+    /** Draws the eight resize handles without allocating during draw. */
+    private fun drawSelectionHandles(canvas: Canvas, bounds: RectF) {
+        val radius = resources.displayMetrics.density * 5f
+        val l = bounds.left * scale + offsetX
+        val t = bounds.top * scale + offsetY
+        val r = bounds.right * scale + offsetX
+        val b = bounds.bottom * scale + offsetY
+        val cx = (l + r) / 2f
+        val cy = (t + b) / 2f
+        drawSelectionHandle(canvas, l, t, radius)
+        drawSelectionHandle(canvas, r, t, radius)
+        drawSelectionHandle(canvas, r, b, radius)
+        drawSelectionHandle(canvas, l, b, radius)
+        drawSelectionHandle(canvas, cx, t, radius)
+        drawSelectionHandle(canvas, r, cy, radius)
+        drawSelectionHandle(canvas, cx, b, radius)
+        drawSelectionHandle(canvas, l, cy, radius)
+    }
+
+    private fun drawSelectionHandle(canvas: Canvas, x: Float, y: Float, radius: Float) {
+        canvas.drawCircle(x, y, radius, selectionHandlePaint)
+        canvas.drawCircle(x, y, radius, selectionHandleOutlinePaint)
+    }
+
+    /**
+     * Whether [wx],[wy] (world mm) lands on already-drawn content: within ~2 mm of a
+     * committed stroke or inside a shape's bounds. Used by Feature 1 to decide whether a
+     * gesture started on existing ink (which slightly lowers the scribble threshold).
+     */
+    private fun hitTestInk(wx: Float, wy: Float): Boolean {
+        val touchR = 2f
+        for (item in displayStrokes) {
+            val pts = item.points
+            var i = 0
+            while (i + 3 < pts.size) {
+                if (pointSegmentDistance(wx, wy, pts[i], pts[i + 1], pts[i + 2], pts[i + 3]) <= touchR) return true
+                i += 2
+            }
+            if (pts.size >= 2 && hypot(pts[pts.size - 2] - wx, pts[pts.size - 1] - wy) <= touchR) return true
+        }
+        for (item in displayShapes) {
+            val p0 = item.corner0
+            val p1 = item.corner1
+            val left = kotlin.math.min(p0.x, p1.x)
+            val right = kotlin.math.max(p0.x, p1.x)
+            val top = kotlin.math.min(p0.y, p1.y)
+            val bottom = kotlin.math.max(p0.y, p1.y)
+            if (wx in left..right && wy in top..bottom) return true
+        }
+        return false
+    }
+
+    private fun pointSegmentDistance(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
+        val abx = bx - ax
+        val aby = by - ay
+        val apx = px - ax
+        val apy = py - ay
+        val len2 = abx * abx + aby * aby
+        val t = if (len2 == 0f) 0f else ((apx * abx + apy * aby) / len2).coerceIn(0f, 1f)
+        val cx = ax + t * abx
+        val cy = ay + t * aby
+        return hypot(px - cx, py - cy)
+    }
 
     private var lastEraserPoint: Point? = null
 
@@ -632,6 +812,7 @@ class InkCanvasView @JvmOverloads constructor(
             grainAlpha = grainAlpha,
             grainDx = grainDx,
             grainDy = grainDx * 0.5f,
+            points = stroke.pointsPacked,
         )
     }
 
@@ -668,8 +849,11 @@ class InkCanvasView @JvmOverloads constructor(
         appendStrokeGeometry(stroke)
     }
 
-    private fun buildShapeGeometry(shape: ShapeObject): CachedShape =
-        CachedShape(ShapeRenderer.buildPath(shape), ShapeRenderer.outlinePaint(shape))
+    private fun buildShapeGeometry(shape: ShapeObject): CachedShape {
+        val c0 = shape.points.getOrNull(0) ?: Point(shape.x, shape.y)
+        val c1 = shape.points.getOrNull(1) ?: Point(shape.x, shape.y)
+        return CachedShape(ShapeRenderer.buildPath(shape), ShapeRenderer.outlinePaint(shape), c0, c1)
+    }
 
     private fun appendShapeGeometry(shape: ShapeObject) {
         if (displayShapeById.containsKey(shape.id)) return
@@ -773,6 +957,9 @@ class InkCanvasView @JvmOverloads constructor(
         // Screen-space selection overlays.
         selectionBoundsMm?.let { bounds ->
             canvas.drawRect(worldRectToScreen(bounds), selectionPaint)
+            // Feature 3: eight resize handles — corners (proportional) and edge midpoints
+            // (single-axis). Drawn in screen space so they stay grabbable at any zoom.
+            drawSelectionHandles(canvas, bounds)
         }
         if (selectionMode == SelectionMode.LASSO) {
             val lasso = lassoScreenRect.also {

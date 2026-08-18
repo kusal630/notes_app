@@ -124,14 +124,29 @@ enum class HorizontalAlignment { LEFT, CENTER, RIGHT }
 @Serializable
 enum class VerticalAlignment { TOP, CENTER, BOTTOM }
 
+/** One recognized speech segment in a Classroom Notes transcript. */
+@Serializable
+data class TranscriptSegment(
+    val id: Long,
+    /** Elapsed ms from the start of the recording. */
+    val startMs: Long,
+    /** Elapsed ms when the segment was finalized (0 while still live). */
+    val endMs: Long = 0L,
+    val text: String = "",
+)
+
 /** Full content of a page. */
 @Serializable
 data class PageContent(
-    val contentVersion: Int = 1,
+    val contentVersion: Int = 2,
     val strokes: List<Stroke> = emptyList(),
     val textObjects: List<TextObject> = emptyList(),
     val imageObjects: List<ImageObject> = emptyList(),
     val shapeObjects: List<ShapeObject> = emptyList(),
+    /** Classroom Notes transcript (timestamps are ms from recording start). */
+    val transcript: List<TranscriptSegment> = emptyList(),
+    /** Placeholder for a future on-device summary; always null/empty for now. */
+    val summary: String? = null,
 )
 
 /** Page background configuration. */

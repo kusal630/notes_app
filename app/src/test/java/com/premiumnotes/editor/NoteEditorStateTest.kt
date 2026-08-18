@@ -15,7 +15,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class NoteEditorStateTest {
 
     private fun stroke(id: Long, x1: Float, y1: Float, x2: Float, y2: Float) =
@@ -31,6 +36,17 @@ class NoteEditorStateTest {
             x = 0f,
             y = 0f,
             points = listOf(Point(0f, 0f), Point(10f, 10f)),
+            strokeWidthMm = 1.5f,
+            colorArgb = 0xFF000000,
+        )
+
+    private fun shapeRect(id: Long, left: Float, top: Float, right: Float, bottom: Float) =
+        ShapeObject(
+            id = id,
+            kind = ShapeKind.RECT,
+            x = left,
+            y = top,
+            points = listOf(Point(left, top), Point(right, bottom)),
             strokeWidthMm = 1.5f,
             colorArgb = 0xFF000000,
         )
@@ -331,5 +347,125 @@ class NoteEditorStateTest {
         val s = NoteEditorState(PageContent(strokes = listOf(hl), shapeObjects = listOf(rect)))
         s.selectAt(5f, 5f)
         assertEquals(setOf(2L), s.selectedIds.value)
+    }
+
+    // --- Phase 7/8: selecting a shape pulls in its contained content ------------------
+
+    private fun shapeWithInk(): NoteEditorState {
+        val content = PageContent(
+            strokes = listOf(
+                stroke(10, 2f, 2f, 8f, 8f),          // fully inside the outer shape
+                stroke(11, 9f, 9f, 20f, 20f),        // pokes outside -> not contained
+            ),
+            shapeObjects = listOf(
+                shapeRect(1),                        // outer shape (0,0)-(10,10)
+                shapeRect(2, 4f, 4f, 5f, 5f),        // nested shape, both corners inside
+            ),
+        )
+        return NoteEditorState(content)
+    }
+
+    @Test
+    fun selectingShapeIncludesFullyContainedContent() {
+        val s = shapeWithInk()
+        // Tap the outer shape's left edge, far from the nested shape and both strokes,
+        // so only the outer shape is hit and containment decides the rest.
+        s.selectAt(0.5f, 9.5f)
+        assertEquals(setOf(1L, 2L, 10L), s.selectedIds.value)
+    }
+
+    @Test
+    fun selectingStrokeDoesNotPullInShapes() {
+        val s = shapeWithInk()
+        s.selectAt(5f, 5f) // on the diagonal ink stroke -> the stroke is topmost
+        assertEquals(setOf(10L), s.selectedIds.value)
+    }
+
+    @Test
+    fun movingShapeMovesContainedContentTogether() {
+        val s = shapeWithInk()
+        s.selectAt(0.5f, 9.5f)
+        s.beginMoveSelection(0f, 0f)
+        s.moveSelectionTo(10f, 5f)
+        s.endMoveSelection()
+
+        val movedShape = s.content.value.shapeObjects.first { it.id == 1L }
+        assertEquals(10f, movedShape.x, 0.001f)
+        assertEquals(5f, movedShape.y, 0.001f)
+        val movedStroke = s.content.value.strokes.first { it.id == 10L }
+        assertTrue(movedStroke.pointsPacked.contentEquals(floatArrayOf(12f, 7f, 18f, 13f)))
+
+        // The outside stroke is untouched.
+        val outside = s.content.value.strokes.first { it.id == 11L }
+        assertTrue(outside.pointsPacked.contentEquals(floatArrayOf(9f, 9f, 20f, 20f)))
+    }
+
+    @Test
+    fun cornerResizeKeepsAspectRatio() {
+        val s = shapeWithInk()
+        s.selectAt(0.5f, 9.5f)
+        s.beginResizeSelection(2) // bottom-right corner (proportional)
+        s.resizeSelectionTo(20f, 10f)
+        s.endResizeSelection()
+
+        val shape = s.content.value.shapeObjects.first { it.id == 1L }
+        val a = shape.points[0]
+        val b = shape.points[1]
+        val width = kotlin.math.abs(b.x - a.x)
+        val height = kotlin.math.abs(b.y - a.y)
+        assertEquals(width, height, 0.01f)
+
+        // Contained content scales by the same factor about the same anchor.
+        val stroke = s.content.value.strokes.first { it.id == 10L }
+        val pts = stroke.pointsPacked
+        val sx = (pts[2] - pts[0]) / (8f - 2f)
+        val sy = (pts[3] - pts[1]) / (8f - 2f)
+        assertEquals(sx, sy, 0.001f)
+        assertEquals(width / 10f, sx, 0.01f)
+    }
+
+    @Test
+    fun edgeResizeIsSingleAxis() {
+        val s = shapeWithInk()
+        s.selectAt(0.5f, 9.5f)
+        s.beginResizeSelection(5) // right edge (horizontal only)
+        s.resizeSelectionTo(22f, 5f)
+        s.endResizeSelection()
+
+        val shape = s.content.value.shapeObjects.first { it.id == 1L }
+        val a = shape.points[0]
+        val b = shape.points[1]
+        val width = kotlin.math.abs(b.x - a.x)
+        val height = kotlin.math.abs(b.y - a.y)
+        assertEquals(10f, height, 0.001f) // y unchanged
+        assertTrue(width > 10f)           // x grew
+
+        // Contained stroke scales horizontally only: y offsets unchanged.
+        val stroke = s.content.value.strokes.first { it.id == 10L }
+        val pts = stroke.pointsPacked
+        assertEquals(2f, pts[1], 0.001f)
+        assertEquals(8f, pts[3], 0.001f)
+        assertTrue(pts[2] > 8f)
+    }
+
+    @Test
+    fun resizeSelectionUndoesAndRedoes() {
+        val s = shapeWithInk()
+        s.selectAt(0.5f, 9.5f)
+        val original = s.content.value.shapeObjects.first { it.id == 1L }.points
+        s.beginResizeSelection(2)
+        s.resizeSelectionTo(20f, 20f)
+        s.endResizeSelection()
+        val resized = s.content.value.shapeObjects.first { it.id == 1L }.points
+        assertTrue(resized[1].x > original[1].x)
+
+        s.undo()
+        val restored = s.content.value.shapeObjects.first { it.id == 1L }.points
+        assertEquals(original[0].x, restored[0].x, 0.001f)
+        assertEquals(original[1].x, restored[1].x, 0.001f)
+
+        s.redo()
+        val reapplied = s.content.value.shapeObjects.first { it.id == 1L }.points
+        assertEquals(resized[1].x, reapplied[1].x, 0.001f)
     }
 }

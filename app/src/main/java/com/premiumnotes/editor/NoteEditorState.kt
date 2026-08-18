@@ -110,6 +110,16 @@ class NoteEditorState(
         apply(AddShapeCommand(shape))
     }
 
+    /**
+     * Replaces the Classroom Notes transcript (live during recording, static on reopen).
+     * Not an undoable drawing action — it flows straight into [PageContent] so autosave
+     * persists it with the page.
+     */
+    fun setTranscript(transcript: List<com.premiumnotes.model.TranscriptSegment>) {
+        _content.value = _content.value.copy(transcript = transcript)
+        ids.accumulateAndGet(transcript.maxOfOrNull { it.id } ?: 0L) { c, m -> maxOf(c, m) }
+    }
+
     fun nextId(): Long = ids.incrementAndGet()
 
     /** Applies a command, records it for undo, clears redo. */
@@ -189,8 +199,59 @@ class NoteEditorState(
             highlighters.isNotEmpty() -> highlighters.last().id
             else -> null
         }
-        _selectedIds.value = if (topId != null) setOf(topId) else emptySet()
+        if (topId == null) {
+            _selectedIds.value = emptySet()
+            return
+        }
+        val topShape = _content.value.shapeObjects.find { it.id == topId }
+        if (topShape == null) {
+            _selectedIds.value = setOf(topId)
+            return
+        }
+        // Selecting a shape pulls in everything fully inside it (Feature 3): ink strokes
+        // whose points all fall inside its bounds, and shapes whose corners both do.
+        // Contained content then follows the shape on move/resize because it is part of
+        // the selection.
+        val ids = HashSet<Long>()
+        ids += topId
+        val region = shapeRegion(topShape)
+        for (s in _content.value.strokes) if (strokeFullyInside(s, region)) ids += s.id
+        for (sh in _content.value.shapeObjects) if (sh.id != topId && shapeFullyInside(sh, region)) ids += sh.id
+        _selectedIds.value = ids
     }
+
+    /** Inflated world-space bounds of a shape (a touch on the outline counts as inside). */
+    private fun shapeRegion(shape: ShapeObject): RectF {
+        val a = shape.points.getOrNull(0) ?: return RectF()
+        val b = shape.points.getOrNull(1)
+            ?: return RectF(a.x - 1f, a.y - 1f, a.x + 1f, a.y + 1f)
+        val pad = 1f
+        return RectF(
+            kotlin.math.min(a.x, b.x) - pad,
+            kotlin.math.min(a.y, b.y) - pad,
+            kotlin.math.max(a.x, b.x) + pad,
+            kotlin.math.max(a.y, b.y) + pad,
+        )
+    }
+
+    private fun strokeFullyInside(s: Stroke, region: RectF): Boolean {
+        val pts = s.pointsPacked
+        var i = 0
+        while (i + 1 < pts.size) {
+            if (!insideRegion(pts[i], pts[i + 1], region)) return false
+            i += 2
+        }
+        return true
+    }
+
+    private fun shapeFullyInside(sh: ShapeObject, region: RectF): Boolean {
+        val a = sh.points.getOrNull(0) ?: return false
+        val b = sh.points.getOrNull(1) ?: return insideRegion(a.x, a.y, region)
+        return insideRegion(a.x, a.y, region) && insideRegion(b.x, b.y, region)
+    }
+
+    private fun insideRegion(x: Float, y: Float, region: RectF): Boolean =
+        x >= region.left && x <= region.right && y >= region.top && y <= region.bottom
 
     /** Selects objects (strokes + shapes) whose bounding box intersects [rect] (world mm). */
     fun selectInRect(rect: RectF) {
@@ -269,7 +330,10 @@ class NoteEditorState(
 
     // --- shape resize -------------------------------------------------------
 
-    /** Starts resizing the selection from one of the four corner handles. */
+    /**
+     * Starts resizing the selection from one of eight handles: corners (0-3, proportional)
+     * or edge midpoints (4-7, single-axis).
+     */
     fun beginResizeSelection(handleIndex: Int) {
         if (selectionBoundsMm == null) return
         resizeHandleIndex = handleIndex
@@ -278,50 +342,86 @@ class NoteEditorState(
     }
 
     /**
-     * Live-resizes the selection: the dragged handle follows [worldX],[worldY] while the
-     * opposite corner stays anchored. Keeps geometry non-degenerate (min 1 mm per axis)
-     * and coalesces the whole drag into a single undo step.
+     * Live-resizes the selection from a corner (proportional, aspect locked) or edge
+     * (single axis) handle. The opposite corner/edge stays anchored. Keeps geometry
+     * non-degenerate (min 1 mm per axis) and coalesces the whole drag into one undo step.
      */
     fun resizeSelectionTo(worldX: Float, worldY: Float) {
         val originalsStrokes = resizeOriginalsStrokes ?: return
         val originalsShapes = resizeOriginalsShapes ?: return
         if (originalsStrokes.isEmpty() && originalsShapes.isEmpty()) return
         val bounds = selectionBoundsMm ?: return
-        // The anchor is the corner opposite the dragged handle; the old handle position
-        // is the handle corner of the ORIGINAL bounds (scale is relative to gesture start).
+        // The anchor is the corner/edge opposite the dragged handle; the old handle
+        // position is the handle of the ORIGINAL bounds (scale relative to gesture start).
         val anchorX: Float
         val anchorY: Float
         val draggedOldX: Float
         val draggedOldY: Float
         when (resizeHandleIndex) {
-            0 -> { // top-left dragged
+            0 -> { // top-left corner (proportional)
                 anchorX = bounds.right; anchorY = bounds.bottom
                 draggedOldX = bounds.left; draggedOldY = bounds.top
             }
-            1 -> { // top-right dragged
+            1 -> { // top-right corner (proportional)
                 anchorX = bounds.left; anchorY = bounds.bottom
                 draggedOldX = bounds.right; draggedOldY = bounds.top
             }
-            2 -> { // bottom-right dragged
+            2 -> { // bottom-right corner (proportional)
                 anchorX = bounds.left; anchorY = bounds.top
                 draggedOldX = bounds.right; draggedOldY = bounds.bottom
             }
-            else -> { // bottom-left dragged
+            3 -> { // bottom-left corner (proportional)
                 anchorX = bounds.right; anchorY = bounds.top
                 draggedOldX = bounds.left; draggedOldY = bounds.bottom
+            }
+            4 -> { // top edge (vertical only)
+                anchorX = (bounds.left + bounds.right) / 2f; anchorY = bounds.bottom
+                draggedOldX = anchorX; draggedOldY = bounds.top
+            }
+            5 -> { // right edge (horizontal only)
+                anchorX = bounds.left; anchorY = (bounds.top + bounds.bottom) / 2f
+                draggedOldX = bounds.right; draggedOldY = anchorY
+            }
+            6 -> { // bottom edge (vertical only)
+                anchorX = (bounds.left + bounds.right) / 2f; anchorY = bounds.top
+                draggedOldX = anchorX; draggedOldY = bounds.bottom
+            }
+            else -> { // left edge (horizontal only)
+                anchorX = bounds.right; anchorY = (bounds.top + bounds.bottom) / 2f
+                draggedOldX = bounds.left; draggedOldY = anchorY
             }
         }
         val denomX = draggedOldX - anchorX
         val denomY = draggedOldY - anchorY
-        val sxRaw = if (denomX == 0f) 1f else (worldX - anchorX) / denomX
-        val syRaw = if (denomY == 0f) 1f else (worldY - anchorY) / denomY
-        // Clamp so |newHandle - anchor| >= 1 mm and the handle never crosses the anchor.
-        val minSx = if (denomX == 0f) 1f else 1f / denomX
-        val minSy = if (denomY == 0f) 1f else 1f / denomY
-        val sx = if (denomX > 0) sxRaw.coerceAtLeast(minSx) else sxRaw.coerceAtMost(minSx)
-        val sy = if (denomY > 0) syRaw.coerceAtLeast(minSy) else syRaw.coerceAtMost(minSy)
-
         val anchor = Point(anchorX, anchorY)
+
+        var sx: Float
+        var sy: Float
+        if (resizeHandleIndex < 4) {
+            // Corner: proportional. Diagonal-distance ratio is the intuitive feel —
+            // content tracks the finger while keeping its aspect ratio.
+            val handleDist = kotlin.math.hypot(draggedOldX - anchorX, draggedOldY - anchorY)
+            val fingerDist = kotlin.math.hypot(worldX - anchorX, worldY - anchorY)
+            var scale = if (handleDist == 0f) 1f else fingerDist / handleDist
+            val minScale = maxOf(
+                if (denomX == 0f) 0f else 1f / kotlin.math.abs(denomX),
+                if (denomY == 0f) 0f else 1f / kotlin.math.abs(denomY),
+            )
+            scale = scale.coerceAtLeast(minScale)
+            sx = scale
+            sy = scale
+        } else {
+            // Edge: single axis. Reuse the sign-aware clamp so the handle never crosses
+            // the anchor and geometry stays at least 1 mm per axis.
+            val minSx = if (denomX == 0f) 1f else 1f / denomX
+            val minSy = if (denomY == 0f) 1f else 1f / denomY
+            val sxRaw = if (denomX == 0f) 1f else (worldX - anchorX) / denomX
+            val syRaw = if (denomY == 0f) 1f else (worldY - anchorY) / denomY
+            sx = if (denomX > 0) sxRaw.coerceAtLeast(minSx) else sxRaw.coerceAtMost(minSx)
+            sy = if (denomY > 0) syRaw.coerceAtLeast(minSy) else syRaw.coerceAtMost(minSy)
+            if (resizeHandleIndex == 4 || resizeHandleIndex == 6) sx = 1f else sy = 1f
+        }
+
         val resizedStrokes = originalsStrokes.map { scaleStroke(it, anchor, sx, sy) }
         val resizedShapes = originalsShapes.map { scaleShape(it, anchor, sx, sy) }
         applyCoalescing(
@@ -851,5 +951,6 @@ private fun PageContent.maxObjectId(): Long {
     for (t in textObjects) if (t.id > max) max = t.id
     for (i in imageObjects) if (i.id > max) max = i.id
     for (sh in shapeObjects) if (sh.id > max) max = sh.id
+    for (seg in transcript) if (seg.id > max) max = seg.id
     return max
 }

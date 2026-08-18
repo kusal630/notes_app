@@ -13,6 +13,7 @@ import com.premiumnotes.model.PenStyle
 import com.premiumnotes.model.ShapeKind
 import com.premiumnotes.model.ShapeObject
 import com.premiumnotes.model.Stroke
+import com.premiumnotes.speech.SpeechController
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,8 @@ class EditorViewModel(
             val content = repository.loadPageContent(pageId) ?: PageContent()
             val state = NoteEditorState(content)
             _editor.value = state
+            // Reopening a classroom note shows its saved transcript in the sidebar (static).
+            SpeechController.setSegments(content.transcript)
 
             // Incremental autosave with debounce — no per-point DB writes.
             viewModelScope.launch {
@@ -103,12 +106,26 @@ class EditorViewModel(
         override fun onSelectionDragEnd() {
             _editor.value?.endMoveSelection()
         }
+
+        override fun onSelectionResizeStart(handleIndex: Int) {
+            _editor.value?.beginResizeSelection(handleIndex)
+        }
+
+        override fun onSelectionResizeTo(worldX: Float, worldY: Float) {
+            _editor.value?.resizeSelectionTo(worldX, worldY)
+        }
+
+        override fun onSelectionResizeEnd() {
+            _editor.value?.endResizeSelection()
+        }
     }
 
     fun setTool(tool: Tool) = _editor.value?.setTool(tool)
     fun setPenStyle(style: PenStyle) = _editor.value?.setPenStyle(style)
     fun setEraserSize(sizeMm: Float) = _editor.value?.setEraserSize(sizeMm)
     fun setShapeKind(kind: ShapeKind) = _editor.value?.setShapeKind(kind)
+    fun setTranscript(segments: List<com.premiumnotes.model.TranscriptSegment>) =
+        _editor.value?.setTranscript(segments)
     fun undo() = _editor.value?.undo()
     fun redo() = _editor.value?.redo()
 

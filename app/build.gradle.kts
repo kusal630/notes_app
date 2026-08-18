@@ -6,6 +6,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+import java.io.File
+import java.net.URI
+import java.util.zip.ZipFile
+
 android {
     namespace = "com.premiumnotes"
     compileSdk = 35
@@ -77,6 +81,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
+    // On-device, offline speech-to-text for Classroom Notes (Apache-2.0, F-Droid friendly).
+    implementation(libs.vosk.android)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.androidx.core.testing)
@@ -91,4 +98,44 @@ dependencies {
 
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+/**
+ * Downloads the small English Vosk model once and unpacks it into src/main/assets/vosk/model
+ * so Classroom Notes works fully offline from first launch (F-Droid friendly: no mandatory
+ * runtime download). ~40 MB. Run: ./gradlew downloadVoskModel
+ * The model is not committed to git; builds without it still succeed — the app shows a
+ * "speech model not installed" message and disables recording gracefully.
+ */
+val VOSK_MODEL_ID = "vosk-model-small-en-us-0.15"
+val voskModelDir = layout.projectDirectory.dir("src/main/assets/vosk/model")
+
+tasks.register("downloadVoskModel") {
+    group = "build"
+    description = "Download and unpack the small English Vosk speech model into assets"
+    val marker = voskModelDir.file("am")
+    val zip = layout.buildDirectory.file("vosk-model.zip")
+    inputs.property("modelId", VOSK_MODEL_ID)
+    outputs.file(marker)
+    doLast {
+        if (marker.asFile.exists()) {
+            logger.lifecycle("Vosk model already present: $voskModelDir")
+            return@doLast
+        }
+        val url = URI("https://alphacephei.com/vosk/models/$VOSK_MODEL_ID.zip").toURL()
+        logger.lifecycle("Downloading $VOSK_MODEL_ID.zip (~40 MB) ...")
+        url.openStream().use { input -> zip.get().asFile.outputStream().use { input.copyTo(it) } }
+        val outDir = voskModelDir.asFile
+        outDir.mkdirs()
+        ZipFile(zip.get().asFile).use { zf ->
+            for (entry in zf.entries()) {
+                val name = entry.name.substringAfter("$VOSK_MODEL_ID/")
+                if (name.isBlank() || entry.isDirectory) continue
+                val target = File(outDir, name)
+                target.parentFile?.mkdirs()
+                zf.getInputStream(entry).use { it.copyTo(target.outputStream()) }
+            }
+        }
+        logger.lifecycle("Vosk model unpacked to $voskModelDir")
+    }
 }

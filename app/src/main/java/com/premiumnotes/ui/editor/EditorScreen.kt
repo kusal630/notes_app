@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.ContentCopy
@@ -34,9 +36,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Summarize
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,7 +48,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -72,7 +78,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.core.content.FileProvider
 import com.premiumnotes.PremiumNotesApp
 import com.premiumnotes.data.NotesRepository
@@ -90,6 +103,10 @@ import com.premiumnotes.model.PageSummary
 import com.premiumnotes.model.PenStyle
 import com.premiumnotes.model.PenType
 import com.premiumnotes.model.ShapeKind
+import com.premiumnotes.model.TranscriptSegment
+import com.premiumnotes.speech.AudioCaptureService
+import com.premiumnotes.speech.ModelDiscovery
+import com.premiumnotes.speech.SpeechController
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -197,6 +214,48 @@ fun EditorScreen(
     // The page rail is a hideable overlay so the canvas stays full-screen for writing.
     var showRail by remember { mutableStateOf(false) }
 
+    // --- Classroom Notes (Feature 2): on-device recording + transcript sidebar. ---
+    val transcript by SpeechController.segments.collectAsState()
+    val partial by SpeechController.partial.collectAsState()
+    val isRecording by SpeechController.isRecording.collectAsState()
+    val recordingPageId by SpeechController.recordingPageId.collectAsState()
+    val classroomAvailable = remember(uiContext) { ModelDiscovery.resolve(uiContext) != null }
+    var classroomNotice by remember { mutableStateOf<String?>(null) }
+
+    // While recording this page, mirror every recognized segment into the page content so
+    // autosave persists it (undo does not apply to transcript updates).
+    LaunchedEffect(transcript, pageId, recordingPageId, isRecording) {
+        if (isRecording && recordingPageId == pageId) {
+            vm.setTranscript(transcript)
+        }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            classroomNotice = null
+            AudioCaptureService.start(uiContext, pageId)
+        } else {
+            classroomNotice = "Microphone permission denied — classroom recording is unavailable. " +
+                "You can still write notes normally."
+        }
+    }
+
+    val toggleClassroom: () -> Unit = {
+        if (isRecording && recordingPageId == pageId) {
+            AudioCaptureService.stop(uiContext)
+            vm.setTranscript(SpeechController.segments.value)
+        } else if (!classroomAvailable) {
+            classroomNotice = "Speech model not installed. Run ./gradlew downloadVoskModel and " +
+                "rebuild to enable Classroom Notes."
+        } else if (uiContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            AudioCaptureService.start(uiContext, pageId)
+        }
+    }
+
     val pageBackground = remember(pageId) {
         pageList.firstOrNull { it.id == pageId }?.background ?: PageBackground()
     }
@@ -233,6 +292,9 @@ fun EditorScreen(
                         }
                     }
                 },
+                isRecording = isRecording && recordingPageId == pageId,
+                classroomAvailable = classroomAvailable,
+                onToggleClassroom = toggleClassroom,
             )
         },
         bottomBar = {
@@ -280,6 +342,14 @@ fun EditorScreen(
                         app.container.settingsRepository.updateSettings { this.smoothing = mode }
                     }
                 },
+                autoEraseEnabled = settings.autoEraseEnabled,
+                onAutoEraseToggle = {
+                    scope.launch {
+                        app.container.settingsRepository.updateSettings {
+                            autoEraseEnabled = !autoEraseEnabled
+                        }
+                    }
+                },
             )
         }
     ) { padding ->
@@ -288,34 +358,78 @@ fun EditorScreen(
             // tablets/landscape get the full page rail.
             val compact = maxWidth < 600.dp
 
-            // Canvas fills the whole screen so you can write edge to edge; the page rail
-            // is a hideable overlay toggled from the top bar.
-            // Keying by pageId recreates the view on page switch so the engine resets and
-            // any in-progress stroke is finalized onto the page it was drawn on.
-            key(pageId) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        InkCanvasView(ctx).also { view ->
-                            view.capabilities = capabilities
-                            view.engine = engine
-                            view.listener = vm.canvasListener
-                            engine.reset()
+            Row(Modifier.fillMaxSize()) {
+                // Canvas fills the whole screen so you can write edge to edge; the page
+                // rail is a hideable overlay toggled from the top bar. Keying by pageId
+                // recreates the view on page switch so the engine resets and any
+                // in-progress stroke is finalized onto the page it was drawn on.
+                Box(Modifier.weight(1f)) {
+                    key(pageId) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                InkCanvasView(ctx).also { view ->
+                                    view.capabilities = capabilities
+                                    view.engine = engine
+                                    view.listener = vm.canvasListener
+                                    engine.reset()
+                                }
+                            },
+                            update = { view ->
+                                view.strokes = content.strokes
+                                view.shapes = content.shapeObjects
+                                view.penStyle = penStyle
+                                view.tool = tool
+                                view.eraserSizeMm = eraserSize
+                                view.shapeKind = shapeKind
+                                view.background = pageBackground
+                                view.selectionBoundsMm = editorState!!.selectionBoundsMm
+                                view.listener = vm.canvasListener
+                                view.autoEraseEnabled = settings.autoEraseEnabled
+                            },
+                            onRelease = { view -> view.finalizeActiveStroke() },
+                        )
+                    }
+                    classroomNotice?.let { notice ->
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(12.dp)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.inverseSurface,
+                            contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                            shape = RoundedCornerShape(8.dp),
+                            tonalElevation = 4.dp,
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(notice, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                TextButton(onClick = { classroomNotice = null }) { Text("Dismiss") }
+                            }
                         }
-                    },
-                    update = { view ->
-                        view.strokes = content.strokes
-                        view.shapes = content.shapeObjects
-                        view.penStyle = penStyle
-                        view.tool = tool
-                        view.eraserSizeMm = eraserSize
-                        view.shapeKind = shapeKind
-                        view.background = pageBackground
-                        view.selectionBoundsMm = editorState!!.selectionBoundsMm
-                        view.listener = vm.canvasListener
-                    },
-                    onRelease = { view -> view.finalizeActiveStroke() },
-                )
+                    }
+                }
+
+                // Classroom Notes transcript sidebar: a sibling of the canvas so it never
+                // steals the pen's touches. Visible whenever a recording session exists
+                // for this page (live during recording, static when reopened).
+                val showTranscript = transcript.isNotEmpty() || partial.isNotEmpty() || isRecording
+                if (showTranscript) {
+                    HorizontalDivider(
+                        modifier = Modifier.width(1.dp).fillMaxHeight(),
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                    TranscriptPanel(
+                        segments = transcript,
+                        partial = if (isRecording) partial else "",
+                        isRecording = isRecording,
+                        onStopRecording = { AudioCaptureService.stop(uiContext) },
+                        modifier = Modifier.widthIn(min = 220.dp, max = 320.dp).fillMaxHeight(),
+                    )
+                }
             }
 
             if (showRail) {
@@ -351,6 +465,9 @@ private fun EditorTopBar(
     onBack: () -> Unit,
     onToggleRail: () -> Unit,
     onExportPdf: () -> Unit,
+    isRecording: Boolean,
+    classroomAvailable: Boolean,
+    onToggleClassroom: () -> Unit,
 ) {
     TopAppBar(
         title = {
@@ -374,8 +491,121 @@ private fun EditorTopBar(
             IconButton(onClick = onExportPdf) {
                 Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF")
             }
+            IconButton(
+                onClick = onToggleClassroom,
+                enabled = classroomAvailable || isRecording,
+            ) {
+                Icon(
+                    Icons.Filled.Mic,
+                    contentDescription = "Classroom Notes (record & transcribe)",
+                    tint = if (isRecording) Color(0xFFE53935) else LocalContentColor.current,
+                )
+            }
         }
     )
+}
+
+/**
+ * Live (or saved) Classroom Notes transcript. A sibling of the canvas — never an overlay
+ * on top of it — so pen input is never stolen. Auto-scrolls while recording so the newest
+ * recognized words stay visible; static text otherwise.
+ */
+@Composable
+private fun TranscriptPanel(
+    segments: List<TranscriptSegment>,
+    partial: String,
+    isRecording: Boolean,
+    onStopRecording: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val listState = rememberLazyListState()
+    Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(Modifier.fillMaxSize().padding(12.dp)) {
+            Text(
+                text = if (isRecording) "Classroom · recording" else "Classroom transcript",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (isRecording) {
+                // A red "live" dot keeps the "still recording" state unmistakable at a glance.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .background(Color(0xFFE53935), CircleShape)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Microphone active — transcription is on-device",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            if (segments.isEmpty() && partial.isBlank()) {
+                Text(
+                    "No speech yet. Speak naturally — recognized words appear here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(segments, key = { it.id }) { seg ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text(
+                                seg.text,
+                                modifier = Modifier.padding(8.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                    if (isRecording && partial.isNotBlank()) {
+                        item(key = "partial") {
+                            Text(
+                                partial,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                LaunchedEffect(segments.size, partial) {
+                    if (isRecording) listState.animateScrollToItem(listState.layoutInfo.totalItemsCount)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onStopRecording,
+                    enabled = isRecording,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Filled.Mic, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Stop")
+                }
+                // Summarization is planned; the button is intentionally disabled and
+                // non-clickable so no dead interaction is promised.
+                Button(
+                    onClick = { /* TODO(feature 4): on-device transcript summarization */ },
+                    enabled = false,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Filled.Summarize, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Summarize")
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -483,6 +713,8 @@ private fun EditorToolbar(
     onDeleteSelection: () -> Unit,
     onDuplicateSelection: () -> Unit,
     onSmoothingChange: (SmoothingMode) -> Unit,
+    autoEraseEnabled: Boolean,
+    onAutoEraseToggle: () -> Unit,
 ) {
     Surface(tonalElevation = 4.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -521,6 +753,17 @@ private fun EditorToolbar(
                     selected = tool == Tool.SHAPES,
                     onClick = { onTool(Tool.SHAPES) },
                     content = { Icon(Icons.Filled.Category, contentDescription = "Shapes") },
+                )
+
+                Spacer(Modifier.width(8.dp))
+
+                // Feature 1: automatic write/erase detection. Off by default; when off the
+                // pen/eraser behave exactly as before. Manual tool selection always wins.
+                ToolButton(
+                    label = "Auto-erase",
+                    selected = autoEraseEnabled,
+                    onClick = onAutoEraseToggle,
+                    content = { Icon(Icons.Filled.AutoFixHigh, contentDescription = "Auto-erase") },
                 )
 
                 Spacer(Modifier.width(8.dp))

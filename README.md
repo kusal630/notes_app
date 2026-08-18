@@ -12,6 +12,9 @@ leaves ink — no proprietary or cloud palm-rejection service required.
 - Handwriting notes with low-latency stroke rendering
 - Software palm rejection for passive styluses and fingers
 - Pen, highlighter, eraser, and selection tools
+- Shapes: draw them, then select, move, or resize a shape with the content inside it
+- Classroom Notes: optional on-device recording that transcribes your lecture in
+  real time (offline Vosk speech model, transcript saved with the note)
 - Multi-page notebooks with a page navigator
 - Infinite canvas with pinch-to-zoom and pan
 - Export notes to PDF and share them with other apps
@@ -20,9 +23,13 @@ leaves ink — no proprietary or cloud palm-rejection service required.
 
 ## Privacy
 
-- 100% offline: all notes are stored on-device in a local Room database
+- 100% offline: all notes are stored on-device in a local Room database, and speech
+  transcription runs entirely on-device (bundled Vosk model) — nothing ever leaves
+  the device
 - No internet permission, no accounts, no tracking, no ads, no analytics
-- No Android permissions requested
+- No Android permissions requested by default. The only permission is an optional
+  one: Classroom Notes asks for the microphone (`RECORD_AUDIO`), and only when you
+  start a classroom recording. The app works fully without granting it.
 - `allowBackup` is disabled so notes are never uploaded to cloud backups
 
 ## Requirements
@@ -53,6 +60,19 @@ from the official Gradle service. Set `ANDROID_HOME` (or provide
 
 Release builds are reproducible: two clean builds from the same commit
 produce byte-for-byte identical APKs.
+
+### Speech model for Classroom Notes
+
+Classroom Notes uses the small English Vosk model for on-device transcription. It
+is downloaded once at build time (~40 MB) and bundled into the APK, so the app
+stays fully offline with no runtime downloads:
+
+```sh
+./gradlew :app:downloadVoskModel
+```
+
+The model is not committed to the repository. Builds without it still succeed;
+the app then disables Classroom Notes with an explanatory message.
 
 ## License
 

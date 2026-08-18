@@ -45,6 +45,13 @@ data class PalmRejectionSettings(
      * Recognition is not implemented yet, so this switch currently has no effect.
      */
     var autoConvertHandwritingToText: Boolean = false,
+    /**
+     * When on, a tight scribble gesture over the page automatically erases instead of
+     * writing (see [com.premiumnotes.input.WriteEraseDetector]). Default off so manual
+     * pen/eraser behavior is exactly as before; manual tool selection always overrides
+     * the heuristic because it only affects the current gesture.
+     */
+    var autoEraseEnabled: Boolean = false,
 ) {
     /** Applies user calibration and sensitivity to yield the effective writing cutoff. */
     fun effectiveWritingMaxMm(): Float {

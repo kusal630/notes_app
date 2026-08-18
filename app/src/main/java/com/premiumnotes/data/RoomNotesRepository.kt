@@ -161,6 +161,9 @@ class RoomNotesRepository(db: AppDatabase) : NotesRepository {
                     textObjects = content.textObjects.map { it.copy(id = -1L) },
                     imageObjects = content.imageObjects.map { it.copy(id = -1L) },
                     shapeObjects = content.shapeObjects.map { it.copy(id = -1L) },
+                    // A classroom recording belongs to the original page, not the copy.
+                    transcript = emptyList(),
+                    summary = null,
                 )
             )
         }.getOrDefault(contentJson)

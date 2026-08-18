@@ -56,10 +56,19 @@ Description: |
   A built-in software palm-rejection pipeline analyzes raw touch input to
   reliably ignore palm rests so only your pen or writing finger leaves ink.
 
-  Features: pen, highlighter, eraser and selection tools; multi-page
-  notebooks; infinite canvas with pinch-to-zoom; PDF export with sharing;
-  light and dark themes; input diagnostics. 100% offline with no accounts,
-  no tracking, no ads, and no permissions requested.
+  Features: pen, highlighter, eraser and selection tools; shapes that can be
+  selected, moved, or resized together with their contained content; optional
+  Classroom Notes on-device lecture transcription (offline Vosk speech model,
+  transcript saved with the note); multi-page notebooks; infinite canvas with
+  pinch-to-zoom; PDF export with sharing; light and dark themes; input
+  diagnostics. 100% offline with no accounts, no tracking, and no ads.
+
+  Permissions: none requested by default. Classroom Notes asks for the
+  microphone (RECORD_AUDIO) only when the user starts a classroom recording;
+  the app works fully without granting it. The speech model is bundled at
+  build time by the downloadVoskModel Gradle task (not committed to this
+  repository); builds without it simply disable Classroom Notes. No internet
+  permission, so audio never leaves the device.
 
 RepoType: git
 Repo: https://github.com/YOUR-USER/premium-notes

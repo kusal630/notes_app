@@ -8,6 +8,9 @@ Features
 - Handwriting notes with low-latency stroke rendering
 - Software palm rejection for passive styluses and fingers
 - Pen, highlighter, eraser, and selection tools
+- Shapes: draw them, then select, move, or resize a shape with the content inside it
+- Classroom Notes: optional on-device recording that transcribes your lecture in
+  real time (offline speech model, transcript saved with the note)
 - Multiple pages per notebook with a page navigator
 - Infinite canvas with pinch-to-zoom and pan
 - Export notes to PDF and share them with other apps
@@ -15,9 +18,11 @@ Features
 - Input diagnostics for calibrating your device
 
 Privacy
-- 100% offline: all notes are stored on your device in a local database
+- 100% offline: all notes are stored on your device in a local database, and speech
+  transcription runs entirely on-device — nothing ever leaves your device
 - No internet permission, no accounts, no tracking, no ads, no analytics
-- No permissions requested at all
+- No permissions requested by default. Classroom Notes asks for the microphone only
+  when you start a recording; the app works fully without granting it.
 
 Premium Notes is free software, released under the GNU General Public License
 v3 (or later).

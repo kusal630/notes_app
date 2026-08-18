@@ -1,13 +1,13 @@
 [versions]
-agp = "8.13.2"
-kotlin = "2.1.0"
-ksp = "2.1.0-1.0.29"
+agp = "9.3.1"
+kotlin = "2.2.10"
+ksp = "2.3.6"
 coreKtx = "1.15.0"
 lifecycle = "2.8.7"
 activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 navigationCompose = "2.8.5"
-room = "2.6.1"
+room = "2.8.4"
 coroutines = "1.9.0"
 serialization = "1.7.3"
 junit = "4.13.2"
@@ -16,6 +16,7 @@ espresso = "3.6.1"
 coreTesting = "2.2.0"
 robolectric = "4.14.1"
 datastore = "1.1.1"
+vosk = "0.3.75"
 
 
 [libraries]
@@ -45,6 +46,7 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "a
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }
 androidx-core-testing = { group = "androidx.arch.core", name = "core-testing", version.ref = "coreTesting" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
 
 
 [plugins]
