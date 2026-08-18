@@ -174,4 +174,51 @@ class PalmClassifierTest {
         val r2 = defaults.classify(normal, PalmClassifier.ClassifyContext(mode = strict))
         assertEquals(ContactClassification.WRITING, r2.classification)
     }
+
+    @Test
+    fun relativeClassificationIsScaleInvariantAcrossDigitizers() {
+        // The SAME pen+palm scenario expressed at two very different absolute scales must
+        // classify identically. Raw touch-size values are not calibrated across digitizers,
+        // so an absolute threshold would call one "pen" and the other "palm"; the relative
+        // ratio-based comparison is immune to that scaling.
+        val normalizer = InputNormalizer(testCapabilities())
+
+        fun pen(major: Float) = normalizer.normalize(
+            TestTouchFactory.contact(0, 100f, 100f, 0L, majorPx = major, minorPx = major * 0.92f, size = 0f)
+        )
+        fun palm(major: Float) = normalizer.normalize(
+            TestTouchFactory.contact(1, 500f, 700f, 0L, majorPx = major, minorPx = major * 0.8f, size = 0f)
+        )
+
+        val scenarios = listOf(
+            pen(26f) to palm(300f), // baseline digitizer scale (~2.6mm pen, ~30mm palm)
+            pen(52f) to palm(600f), // coarser digitizer, 2x the raw values
+            pen(78f) to palm(900f), // 3x the raw values
+        )
+
+        for ((penC, palmC) in scenarios) {
+            val classifier = PalmClassifier(testSettings(PalmRejectionMode.WRITING))
+
+            // Palm lands alone first (cold start) and is rejected -> seeds confirmed-palm range.
+            val palmFirst = classifier.classify(
+                palmC,
+                PalmClassifier.ClassifyContext(mode = PalmRejectionMode.WRITING, pointerCount = 1, fingerWritingEnabled = true),
+            )
+            assertEquals(ContactClassification.PALM, palmFirst.classification)
+            classifier.updateHistory(
+                ClassifiedContact(palmC, palmFirst.classification, palmFirst.confidence, palmFirst.reason, palmFirst.effectiveThresholdMm, 0f, 0L)
+            )
+
+            // Pen joins while the palm rests: both are classified by the RELATIVE path.
+            val sizes = listOf(palmC.maxDimMm, penC.maxDimMm)
+            val ctx = PalmClassifier.ClassifyContext(
+                mode = PalmRejectionMode.WRITING,
+                pointerCount = 2,
+                activeSizesMm = sizes,
+                fingerWritingEnabled = true,
+            )
+            assertEquals(ContactClassification.WRITING, classifier.classify(penC, ctx).classification)
+            assertEquals(ContactClassification.PALM, classifier.classify(palmC, ctx).classification)
+        }
+    }
 }

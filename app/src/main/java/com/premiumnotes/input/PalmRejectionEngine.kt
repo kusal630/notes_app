@@ -27,6 +27,7 @@ class PalmRejectionEngine(
     fun reset() {
         lock.reset(System.nanoTime())
         pointerStates.clear()
+        classifier.resetHistory()
     }
 
     /** Recreates derived state only when the settings instance actually changes. */
@@ -38,7 +39,10 @@ class PalmRejectionEngine(
                 lock = WritingLock(settings.writingHoldoffMs)
                 lastKnownHoldoffMs = settings.writingHoldoffMs
             }
-            classifier = PalmClassifier(settings)
+            // Update the classifier's settings in place: recreating it would wipe the
+            // adaptive history (the device's learned contact-size scale), which must
+            // survive settings tweaks within a session.
+            classifier.updateSettings(settings)
         }
     }
 
@@ -46,15 +50,20 @@ class PalmRejectionEngine(
         refreshIfSettingsChanged()
         val nowNanos = frame.eventTimeNanos
 
+        // Normalize every active contact once so the relative classifier can compare the
+        // CURRENT frame's contact sizes against each other.
+        val normalized = frame.contacts.map { normalizer.normalize(it) }
+        val activeSizesMm = normalized.map { it.maxDimMm }
+
         val classified = mutableListOf<ClassifiedContact>()
-        for (raw in frame.contacts) {
-            val contact = normalizer.normalize(raw)
+        for (contact in normalized) {
             val state = pointerStates[contact.pointerId]
             val result = classifier.classify(
                 contact,
                 PalmClassifier.ClassifyContext(
                     mode = currentSettings.mode,
                     pointerCount = frame.pointerCount,
+                    activeSizesMm = activeSizesMm,
                     activeWritingPointerId = lock.activePointerId,
                     writingLockActive = lock.isActive,
                     contactSpeedMmPerSec = state?.speedMmPerSec ?: 0f,
@@ -62,7 +71,7 @@ class PalmRejectionEngine(
                     fingerWritingEnabled = currentSettings.enableFingerWriting,
                 )
             )
-            classified += ClassifiedContact(
+            val classifiedContact = ClassifiedContact(
                 contact = contact,
                 classification = result.classification,
                 confidence = result.confidence,
@@ -71,6 +80,10 @@ class PalmRejectionEngine(
                 speedMmPerSec = state?.speedMmPerSec ?: 0f,
                 durationMs = state?.let { (nowNanos - it.downTimeNanos) / 1_000_000L } ?: 0L,
             )
+            classified += classifiedContact
+            // Feed the decision back so the adaptive single-pointer fallback learns this
+            // device's real contact-size scale.
+            classifier.updateHistory(classifiedContact)
         }
 
         val writingPointerId = manageWritingLock(frame, classified, nowNanos)

@@ -288,4 +288,81 @@ class PalmRejectionEngineTest {
         )
         assertEquals(0, next.activeWritingPointerId)
     }
+
+    // --- Phase 3: two palms/heels resting simultaneously with pen writing --------------
+
+    @Test
+    fun twoPalmsRestingWithPenAcceptsOnlyTheGenuinelySmallest() {
+        val e = engine()
+
+        // Palm 1 lands alone first (cold start) -> rejected as palm, no lock.
+        val palmFirst = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.palm(pointerId = 2, timeMs = 0L)), added = 2)
+        )
+        assertNull(palmFirst.activeWritingPointerId)
+        assertEquals(ContactClassification.PALM, palmFirst.contactFor(2)?.classification)
+
+        // Palm 2 lands while palm 1 still rests -> rejected too (even the smallest active
+        // contact is palm-sized, so nothing here is genuinely small). No gestures.
+        val palm1 = TestTouchFactory.palm(pointerId = 2, x = 500f, y = 700f, timeMs = 20L)
+        val palm2 = TestTouchFactory.palm(pointerId = 4, x = 800f, y = 900f, timeMs = 20L)
+        val twoPalms = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm1, palm2), added = 4)
+        )
+        assertNull(twoPalms.activeWritingPointerId)
+        assertEquals(ContactClassification.PALM, twoPalms.contactFor(2)?.classification)
+        assertEquals(ContactClassification.PALM, twoPalms.contactFor(4)?.classification)
+        assertTrue(twoPalms.gesturePointerIds.isEmpty())
+
+        // Pen joins while both palms rest: it is the genuinely smallest contact and must
+        // claim writing immediately; both larger contacts stay rejected.
+        val pen = TestTouchFactory.pen(pointerId = 0, x = 120f, y = 110f, timeMs = 40L)
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 40L, listOf(palm1, palm2, pen), added = 0)
+        )
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+        assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
+        assertEquals(ContactClassification.PALM, out.contactFor(4)?.classification)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    // --- Phase 3: adaptive single-pointer fallback after history exists ----------------
+
+    @Test
+    fun lonePalmAfterPenStrokesIsRejectedByAdaptiveHistory() {
+        val e = engine()
+
+        // A pen stroke seeds the confirmed-small range and establishes/lifts the lock.
+        e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.UP, 10L, listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 10L)), lifted = 0)
+        )
+
+        // A lone palm lands after the pen lifted -> rejected via the adaptive fallback:
+        // it is far larger than the device's confirmed-small range. No drawing, no lock.
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 30L, listOf(TestTouchFactory.palm(2, timeMs = 30L)), added = 2)
+        )
+        assertNull(out.activeWritingPointerId)
+        assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
+    }
+
+    @Test
+    fun loneFingerTapAfterPenStrokesStaysValid() {
+        val e = engine()
+
+        // A pen stroke seeds the confirmed-small range.
+        e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+        e.process(
+            TestTouchFactory.frame(InputAction.UP, 10L, listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 10L)), lifted = 0)
+        )
+
+        // A lone fingertip (UI tap) after pen strokes must NOT be misclassified as a palm.
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 30L, listOf(TestTouchFactory.fingertip(3, timeMs = 30L)), added = 3)
+        )
+        val cls = out.contactFor(3)?.classification
+        assertTrue(cls == ContactClassification.FINGER || cls == ContactClassification.WRITING)
+    }
 }
