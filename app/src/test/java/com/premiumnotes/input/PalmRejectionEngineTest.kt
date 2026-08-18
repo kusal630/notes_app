@@ -365,4 +365,82 @@ class PalmRejectionEngineTest {
         val cls = out.contactFor(3)?.classification
         assertTrue(cls == ContactClassification.FINGER || cls == ContactClassification.WRITING)
     }
+
+    // --- Bug regression: resting palm must never permanently block writing -------------
+
+    /** A medium palm (~15mm) whose size sits in the finger/writing band. */
+    private fun mediumPalm(
+        pointerId: Int = 2,
+        x: Float = 500f,
+        y: Float = 700f,
+        timeMs: Long = 0L,
+    ) = TestTouchFactory.contact(
+        pointerId, x, y, timeMs,
+        majorPx = 150f, minorPx = 120f, pressure = 1f, size = 0.28f,
+    )
+
+    @Test
+    fun penTakesOverWritingLockFromFalselyLockedMediumPalm() {
+        val e = engine()
+
+        // A medium palm alone is below the finger threshold and is misclassified WRITING,
+        // claiming the writing lock — the root cause of "palm on screen then nothing writes".
+        val palmAlone = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(mediumPalm(timeMs = 0L)), added = 2)
+        )
+        assertEquals(2, palmAlone.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, palmAlone.contactFor(2)?.classification)
+
+        // A genuinely small pen contact lands while the palm still rests. It is ~5.8x
+        // smaller than the locked contact, so the lock must be handed to it — NOT dropped,
+        // which would turn both contacts into a two-finger gesture that swallows the stroke.
+        val palm = mediumPalm(timeMs = 20L)
+        val pen = TestTouchFactory.pen(pointerId = 0, x = 120f, y = 110f, timeMs = 20L)
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm, pen), added = 0)
+        )
+        assertEquals(0, out.activeWritingPointerId)
+        assertTrue(out.gesturePointerIds.isEmpty())
+
+        // Pen keeps writing with the palm still resting: lock stays on the pen, no gesture.
+        val move = e.process(
+            TestTouchFactory.frame(
+                InputAction.MOVE, 30L,
+                listOf(mediumPalm(x = 500f, y = 700f, timeMs = 30L), TestTouchFactory.pen(0, x = 140f, y = 130f, timeMs = 30L)),
+            )
+        )
+        assertEquals(0, move.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, move.contactFor(0)?.classification)
+        assertTrue(move.gesturePointerIds.isEmpty())
+    }
+
+    @Test
+    fun fingerWritingRecoversAfterAmbiguousGestureWithMediumPalm() {
+        val e = engine()
+
+        // Medium palm rests alone (false lock), then a similar-sized fingertip lands.
+        e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(mediumPalm(timeMs = 0L)), added = 2)
+        )
+        val palm = mediumPalm(timeMs = 20L)
+        val finger = TestTouchFactory.fingertip(pointerId = 0, x = 220f, y = 220f, timeMs = 20L)
+        val gesture = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm, finger), added = 0)
+        )
+        // The fingertip is NOT dramatically smaller than the palm (ratio < 2.5), so this is
+        // an (ambiguous) two-finger gesture: the false lock drops and the pair may navigate.
+        assertNull(gesture.activeWritingPointerId)
+        assertEquals(2, gesture.gesturePointerIds.size)
+
+        // Everything lifts.
+        e.process(TestTouchFactory.frame(InputAction.POINTER_UP, 40L, listOf(mediumPalm(x = 500f, y = 700f, timeMs = 40L)), lifted = 0))
+        e.process(TestTouchFactory.frame(InputAction.UP, 50L, listOf(mediumPalm(x = 500f, y = 700f, timeMs = 50L)), lifted = 2))
+
+        // Writing alone afterwards must work — no stuck lock, no swallowed strokes.
+        val alone = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 70L, listOf(TestTouchFactory.fingertip(0, x = 220f, y = 220f, timeMs = 70L)), added = 0)
+        )
+        assertEquals(0, alone.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, alone.contactFor(0)?.classification)
+    }
 }

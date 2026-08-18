@@ -314,6 +314,17 @@ class InkCanvasView @JvmOverloads constructor(
             }
 
             else -> {
+                // Reconcile the engine-owned lock against this view's stroke state. The
+                // engine may drop or reassign the writing lock mid-gesture (e.g. a resting
+                // palm that was falsely locked while alone, then a genuinely small contact
+                // arrived and claimed the lock — or a two-finger gesture reset the lock via
+                // the navigation path). If the engine no longer writes with the pointer this
+                // view is drawing with, finalize the stale stroke so a fresh one can start.
+                // Without this the canvas stays stuck: a phantom stroke holds the builder
+                // slot and every new stroke is silently swallowed.
+                if (strokeBuilder != null && classified.activeWritingPointerId != writingPointerId) {
+                    finalizeActiveStroke()
+                }
                 val writingId = classified.activeWritingPointerId ?: return
                 val contact = classified.contactFor(writingId) ?: return
                 when (input.action) {

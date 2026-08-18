@@ -176,6 +176,35 @@ class PalmClassifierTest {
     }
 
     @Test
+    fun genuinelySmallestContactWithClearGapIsWritingEvenBeforeHistorySeeded() {
+        // A resting contact that is not yet confirmed as a palm (its size sits in the
+        // finger/writing band) plus a clearly smaller pen. The pen is the genuinely
+        // smallest contact in the frame and must be WRITING even though no palm has been
+        // confirmed in history yet — otherwise a real writer landing next to a resting
+        // palm can never be accepted.
+        val normalizer = InputNormalizer(testCapabilities())
+        val palmC = normalizer.normalize(
+            TestTouchFactory.contact(1, 500f, 700f, 0L, majorPx = 150f, minorPx = 120f, size = 0f)
+        )
+        val penC = normalizer.normalize(
+            TestTouchFactory.contact(0, 100f, 100f, 0L, majorPx = 26f, minorPx = 24f, size = 0f)
+        )
+        val ctx = PalmClassifier.ClassifyContext(
+            mode = PalmRejectionMode.WRITING,
+            pointerCount = 2,
+            activeSizesMm = listOf(palmC.maxDimMm, penC.maxDimMm),
+            fingerWritingEnabled = true,
+        )
+        val classifier = PalmClassifier(testSettings(PalmRejectionMode.WRITING))
+
+        // Pen is the smallest and dramatically smaller than the resting contact -> WRITING.
+        assertEquals(ContactClassification.WRITING, classifier.classify(penC, ctx).classification)
+        assertEquals(ClassificationReason.SMALL_CONTACT, classifier.classify(penC, ctx).reason)
+        // The resting contact is the large outlier -> palm.
+        assertEquals(ContactClassification.PALM, classifier.classify(palmC, ctx).classification)
+    }
+
+    @Test
     fun relativeClassificationIsScaleInvariantAcrossDigitizers() {
         // The SAME pen+palm scenario expressed at two very different absolute scales must
         // classify identically. Raw touch-size values are not calibrated across digitizers,

@@ -173,7 +173,30 @@ class PalmRejectionEngine(
                         } else {
                             val nonPalm = added.classification == ContactClassification.WRITING ||
                                 added.classification == ContactClassification.FINGER
-                            if (nonPalm) lock.reset(nowNanos)
+                            if (nonPalm) {
+                                // A second contact landed while a lock is active. Two cases:
+                                //  - The locked pointer is genuinely small (a pen/finger) and
+                                //    the new contact is finger-sized too: this is a two-finger
+                                //    pan/zoom intent — drop the lock so the pair navigates.
+                                //  - The locked pointer is LARGE while the new contact is
+                                //    dramatically smaller (>= PALM_RATIO_VS_SMALLEST gap): the
+                                //    lock was held by a false-positive palm (a resting palm
+                                //    whose size fell in the finger/writing band while alone).
+                                //    Hand the lock to the genuinely small contact so writing
+                                //    works even with the palm still resting — otherwise the
+                                //    user can never draw while the palm is down.
+                                val locked = classified.firstOrNull { it.contact.pointerId == lock.activePointerId }
+                                val lockedDim = locked?.contact?.maxDimMm ?: 0f
+                                val addedDim = added.contact.maxDimMm
+                                val lockHeldByFalsePalm = lockedDim > 0f && addedDim > 0f &&
+                                    lockedDim / addedDim >= PalmClassifier.PALM_RATIO_VS_SMALLEST
+                                if (lockHeldByFalsePalm && currentSettings.enableFingerWriting) {
+                                    lock.reset(nowNanos)
+                                    lock.tryClaim(addedId, nowNanos, respectHoldoff = false)
+                                } else {
+                                    lock.reset(nowNanos)
+                                }
+                            }
                         }
                     }
                 }

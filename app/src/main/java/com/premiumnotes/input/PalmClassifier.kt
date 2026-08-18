@@ -180,14 +180,27 @@ class PalmClassifier(
         val avgValid = history.validSizes.averageOrNull()
         val avgPalm = history.palmSizes.averageOrNull()
 
-        // The genuinely smallest pointer. Three cases against the device's confirmed
+        // The genuinely smallest pointer. Four cases against the device's confirmed
         // ranges:
+        //  - dramatically smaller than the SECOND-smallest contact in this same frame
+        //    (>= PALM_RATIO_VS_SMALLEST gap) => the writing candidate, regardless of
+        //    history. A resting palm is never this much smaller than a pen/fingertip;
+        //    the palm is the LARGE one. This catches a real writer landing next to a
+        //    resting palm even before this device's adaptive history is seeded.
         //  - clearly much smaller than the confirmed palm size => the writing candidate;
         //  - no palm reference yet (e.g. two fingers starting a gesture) => valid finger,
         //    never a writer on its own;
         //  - even the smallest contact is itself palm-sized (two palms resting, no pen)
         //    => a palm, because nothing in this frame is genuinely small.
         if (dim <= minActive * 1.0001f) {
+            if (measurable.size >= 2) {
+                val secondSmallest = measurable.sorted()[1]
+                if (secondSmallest / dim >= PALM_RATIO_VS_SMALLEST) {
+                    return result(
+                        ContactClassification.WRITING, 0.85f, ClassificationReason.SMALL_CONTACT, secondSmallest, ctx
+                    )
+                }
+            }
             if (avgPalm != null) {
                 return if (dim <= avgPalm / PALM_RANGE_SPLIT) {
                     result(ContactClassification.WRITING, 0.85f, ClassificationReason.SMALL_CONTACT, minActive, ctx)
