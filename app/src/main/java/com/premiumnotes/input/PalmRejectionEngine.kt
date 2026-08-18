@@ -178,19 +178,24 @@ class PalmRejectionEngine(
                                 //  - The locked pointer is genuinely small (a pen/finger) and
                                 //    the new contact is finger-sized too: this is a two-finger
                                 //    pan/zoom intent — drop the lock so the pair navigates.
-                                //  - The locked pointer is LARGE while the new contact is
-                                //    dramatically smaller (>= PALM_RATIO_VS_SMALLEST gap): the
-                                //    lock was held by a false-positive palm (a resting palm
-                                //    whose size fell in the finger/writing band while alone).
-                                //    Hand the lock to the genuinely small contact so writing
-                                //    works even with the palm still resting — otherwise the
-                                //    user can never draw while the palm is down.
+                                //  - The lock is held by a false-positive palm (a resting palm
+                                //    whose size fell in the finger/writing band while alone) and
+                                //    the new contact is the real writer: hand the lock to it so
+                                //    writing works even with the palm still resting — otherwise
+                                //    the user can never draw while the palm is down.
+                                //
+                                // A contact is the real writer when it is WRITING-classified
+                                // (a hardware stylus is always the writer, regardless of size)
+                                // or when it is clearly smaller than the falsely-locked palm.
                                 val locked = classified.firstOrNull { it.contact.pointerId == lock.activePointerId }
                                 val lockedDim = locked?.contact?.maxDimMm ?: 0f
                                 val addedDim = added.contact.maxDimMm
-                                val lockHeldByFalsePalm = lockedDim > 0f && addedDim > 0f &&
-                                    lockedDim / addedDim >= PalmClassifier.PALM_RATIO_VS_SMALLEST
-                                if (lockHeldByFalsePalm && currentSettings.enableFingerWriting) {
+                                val addedIsConfirmedWriter = added.classification == ContactClassification.WRITING
+                                val addedClearlySmaller = lockedDim > 0f && addedDim > 0f &&
+                                    lockedDim / addedDim >= PalmClassifier.PALM_HANDOFF_RATIO
+                                val handOff = addedIsConfirmedWriter ||
+                                    (addedClearlySmaller && currentSettings.enableFingerWriting)
+                                if (handOff) {
                                     lock.reset(nowNanos)
                                     lock.tryClaim(addedId, nowNanos, respectHoldoff = false)
                                 } else {

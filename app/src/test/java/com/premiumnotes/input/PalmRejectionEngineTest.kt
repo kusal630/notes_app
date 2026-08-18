@@ -427,7 +427,7 @@ class PalmRejectionEngineTest {
         val gesture = e.process(
             TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm, finger), added = 0)
         )
-        // The fingertip is NOT dramatically smaller than the palm (ratio < 2.5), so this is
+        // The fingertip is NOT dramatically smaller than the palm (ratio < 1.6), so this is
         // an (ambiguous) two-finger gesture: the false lock drops and the pair may navigate.
         assertNull(gesture.activeWritingPointerId)
         assertEquals(2, gesture.gesturePointerIds.size)
@@ -442,5 +442,82 @@ class PalmRejectionEngineTest {
         )
         assertEquals(0, alone.activeWritingPointerId)
         assertEquals(ContactClassification.WRITING, alone.contactFor(0)?.classification)
+    }
+
+    @Test
+    fun passivePenClearlySmallerThanFalselyLockedPalmTakesOverLock() {
+        val e = engine()
+
+        // Medium palm rests alone -> falsely locked as the writer.
+        e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(mediumPalm(timeMs = 0L)), added = 2)
+        )
+
+        // A passive pen (~8mm, tool type FINGER) lands: only ~1.9x smaller than the palm,
+        // not enough for the strict 2.5x relative classifier, but clearly a writer vs the
+        // resting hand. The lock must be handed to it, not dropped into a gesture.
+        val palm = mediumPalm(timeMs = 20L)
+        val pen = TestTouchFactory.contact(0, x = 120f, y = 110f, timeMs = 20L, majorPx = 80f, minorPx = 72f, pressure = 0.6f, size = 0.02f)
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm, pen), added = 0)
+        )
+        assertEquals(0, out.activeWritingPointerId)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    @Test
+    fun stylusTakesOverLockFromFalselyLockedPalmRegardlessOfSize() {
+        val e = engine()
+
+        // Medium palm rests alone -> falsely locked as the writer.
+        e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(mediumPalm(timeMs = 0L)), added = 2)
+        )
+
+        // A hardware stylus lands with a size almost identical to the palm (ratio < 1.6).
+        // A real stylus is always the writer, so the lock must be handed to it regardless
+        // of the size comparison.
+        val palm = mediumPalm(timeMs = 20L)
+        val stylus = TestTouchFactory.pen(pointerId = 0, x = 120f, y = 110f, timeMs = 20L, majorPx = 140f, toolType = TestTouchFactory.TOOL_STYLUS)
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm, stylus), added = 0)
+        )
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    @Test
+    fun mediumPalmRestingWhilePenWritesKeepsLockAfterPalmHistoryConfirmed() {
+        val e = engine()
+
+        // Pen starts writing.
+        e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, timeMs = 0L)), added = 0))
+
+        // A LARGE palm lands while the pen writes -> rejected as palm, seeds the
+        // confirmed-palm range for this device.
+        e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 20L,
+                listOf(TestTouchFactory.pen(0, x = 120f, y = 110f, timeMs = 20L), TestTouchFactory.palm(pointerId = 2, timeMs = 20L)),
+                added = 2,
+            )
+        )
+        // Large palm lifts.
+        e.process(TestTouchFactory.frame(InputAction.POINTER_UP, 30L, listOf(TestTouchFactory.pen(0, x = 140f, y = 130f, timeMs = 30L)), lifted = 2))
+
+        // A MEDIUM palm (15mm, below the finger threshold) lands while the pen writes.
+        // The device has now confirmed its palm range, so a matching secondary contact is
+        // the resting hand and must NOT drop the writing lock into a two-finger gesture.
+        val out = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 40L,
+                listOf(TestTouchFactory.pen(0, x = 160f, y = 150f, timeMs = 40L), mediumPalm(timeMs = 40L)),
+                added = 2,
+            )
+        )
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
+        assertTrue(out.gesturePointerIds.isEmpty())
     }
 }

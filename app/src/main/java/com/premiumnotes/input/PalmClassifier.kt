@@ -55,6 +55,16 @@ class PalmClassifier(
         const val PALM_RANGE_SPLIT = 2f
 
         /**
+         * Lock hand-off ratio. When a writing lock is held by a false-positive palm (a
+         * resting palm whose size slipped into the finger/writing band while alone) and a
+         * new contact lands, the lock is handed to that contact when it is at least this
+         * many times smaller than the locked contact. 1.6 separates a passive pen tip
+         * (~5-9mm) from a resting palm (~12-16mm) while keeping two similar-sized fingers
+         * (pan/zoom, ratio ~1.0-1.2) a gesture.
+         */
+        const val PALM_HANDOFF_RATIO = 1.6f
+
+        /**
          * Single-pointer fallback: a lone contact within this multiple of the observed
          * "confirmed small" (valid) size is accepted as valid input. Kept generous so a
          * finger tap after pen strokes is not rejected; anything beyond it must also
@@ -125,10 +135,24 @@ class PalmClassifier(
             // drop the lock and let the pair navigate. The finger/palm split here uses the
             // user's configured finger threshold; it is the gesture-intent disambiguation,
             // not the core palm classification.
+            //
+            // A contact that sits BELOW the finger threshold can still be the resting hand:
+            // devices report palm contacts at wildly different scales, and a palm landing
+            // mid-stroke is genuinely ambiguous with a second finger. Once THIS device has
+            // confirmed a real palm size (relative classification of a previous palm), any
+            // secondary contact matching that confirmed range is the resting hand — keep the
+            // writing lock. Without confirmed palm history the threshold split is the best
+            // available disambiguation.
             val fingerMax = settings.effectiveFingerMaxMm()
+            val avgPalm = history.palmSizes.averageOrNull()
             if (contact.maxDimMm > fingerMax) {
                 return result(
                     ContactClassification.PALM, 0.95f, ClassificationReason.SECONDARY_WHILE_WRITING, fingerMax, ctx
+                )
+            }
+            if (avgPalm != null && contact.maxDimMm >= avgPalm / PALM_RANGE_SPLIT) {
+                return result(
+                    ContactClassification.PALM, 0.6f, ClassificationReason.SECONDARY_WHILE_WRITING, avgPalm / PALM_RANGE_SPLIT, ctx
                 )
             }
             return result(ContactClassification.FINGER, 0.7f, ClassificationReason.MEDIUM_CONTACT, fingerMax, ctx)
