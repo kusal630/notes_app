@@ -51,6 +51,8 @@ import com.premiumnotes.input.InputCapabilities
 import com.premiumnotes.input.PalmRejectionEngine
 import com.premiumnotes.input.PalmRejectionMode
 import com.premiumnotes.input.PalmRejectionSettings
+import com.premiumnotes.input.PalmZoneMode
+import com.premiumnotes.input.PalmZoneSide
 import com.premiumnotes.input.SmoothingMode
 import com.premiumnotes.ui.diagnostics.DiagnosticsScreen
 import com.premiumnotes.ui.editor.EditorScreen
@@ -156,6 +158,7 @@ fun SettingsScreen(
                         this.smoothing = newSettings.smoothing
                         this.enableFingerWriting = newSettings.enableFingerWriting
                         this.autoConvertHandwritingToText = newSettings.autoConvertHandwritingToText
+                        this.palmZone = newSettings.palmZone
                     }
                 }
             })
@@ -269,6 +272,63 @@ fun SettingsContent(
         }
 
         SettingsSectionDivider()
+        SettingsSectionTitle("Palm Rest Zone")
+
+        Text(
+            "Instead of relying only on automatic detection, reserve an area of the canvas " +
+                "for your palm. Any touch inside it is always treated as the resting palm — " +
+                "it can never draw or pan. Measure your hand on the Labs screen, or just " +
+                "drag the blue grip on the canvas to place it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+
+        Text("Zone mode", style = MaterialTheme.typography.bodyLarge)
+        Spacer(Modifier.height(8.dp))
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            PalmZoneMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = settings.palmZone.mode == mode,
+                    onClick = { onSettingChange(settings.copy(palmZone = settings.palmZone.copy(mode = mode))) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = PalmZoneMode.entries.size)
+                ) { Text(mode.label) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Off = automatic detection only · Auto = the zone follows where you write · " +
+                "Manual = it stays where you place it",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (settings.palmZone.mode == PalmZoneMode.AUTO) {
+            Spacer(Modifier.height(12.dp))
+            Text("Palm side (which side of the pen your palm rests on)", style = MaterialTheme.typography.bodyLarge)
+            Spacer(Modifier.height(8.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                PalmZoneSide.entries.forEachIndexed { index, side ->
+                    SegmentedButton(
+                        selected = settings.palmZone.side == side,
+                        onClick = { onSettingChange(settings.copy(palmZone = settings.palmZone.copy(side = side))) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = PalmZoneSide.entries.size)
+                    ) { Text(side.label) }
+                }
+            }
+        }
+
+        if (settings.palmZone.enabled) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Current zone: ${"%.0f".format(settings.palmZone.widthMm)} × " +
+                    "${"%.0f".format(settings.palmZone.heightMm)} mm",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        SettingsSectionDivider()
         SettingsSectionTitle("Stroke Smoothing")
 
         Text("Smoothing level", style = MaterialTheme.typography.bodyLarge)
@@ -291,6 +351,19 @@ private val PalmRejectionMode.label: String
         PalmRejectionMode.BALANCED -> "Balanced"
         PalmRejectionMode.RELAXED -> "Relaxed"
         PalmRejectionMode.STRICT -> "Strict"
+    }
+
+private val PalmZoneMode.label: String
+    get() = when (this) {
+        PalmZoneMode.OFF -> "Off"
+        PalmZoneMode.AUTO -> "Auto"
+        PalmZoneMode.MANUAL -> "Manual"
+    }
+
+private val PalmZoneSide.label: String
+    get() = when (this) {
+        PalmZoneSide.LEFT -> "Left"
+        PalmZoneSide.RIGHT -> "Right"
     }
 
 private fun modeHelp(mode: PalmRejectionMode): String = when (mode) {

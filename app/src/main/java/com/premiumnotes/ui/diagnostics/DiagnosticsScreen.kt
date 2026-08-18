@@ -25,6 +25,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +45,10 @@ import com.premiumnotes.input.InputFrame
 import com.premiumnotes.input.PalmRejectionEngine
 import com.premiumnotes.input.PalmRejectionMode
 import com.premiumnotes.input.PalmRejectionSettings
+import com.premiumnotes.input.PalmZone
+import com.premiumnotes.input.PalmZoneMode
+import com.premiumnotes.input.PalmZoneSide
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -62,8 +67,25 @@ fun DiagnosticsScreen(
 ) {
     var frame by remember { mutableStateOf<ClassifiedFrame?>(null) }
     var inputFrame by remember { mutableStateOf<InputFrame?>(null) }
+    var measuringPalm by remember { mutableStateOf(false) }
+    var palmPeakMm by remember { mutableStateOf(0f) }
     val settings by settingsRepository.settingsFlow.collectAsState(initial = PalmRejectionSettings())
     val scope = rememberCoroutineScope()
+
+    // While "measure my palm" is active, the largest palm contact seen in a 2s window
+    // becomes the zone size (with padding), saved back into settings.
+    LaunchedEffect(measuringPalm) {
+        if (measuringPalm) {
+            palmPeakMm = 0f
+            delay(2000)
+            if (palmPeakMm > 0f) {
+                settingsRepository.updateSettings {
+                    palmZone = PalmZone.fromPalm(palmPeakMm, palmPeakMm * 0.75f, palmZone.side)
+                }
+            }
+            measuringPalm = false
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
@@ -113,6 +135,12 @@ fun DiagnosticsScreen(
                     view.onFrame = { input, classified ->
                         inputFrame = input
                         frame = classified
+                        if (measuringPalm) {
+                            val peak = classified.contacts
+                                .filter { it.classification == ContactClassification.PALM }
+                                .maxOfOrNull { it.contact.maxDimMm }
+                            if (peak != null && peak > palmPeakMm) palmPeakMm = peak
+                        }
                     }
                 }
             }
@@ -185,6 +213,69 @@ fun DiagnosticsScreen(
                         enabled = palmDim != null && palmDim!! > 0f,
                         onClick = { scope.launch { settingsRepository.updateSettings { this.calibration = this.calibration.copy(palmMaxDimMm = palmDim) } } }
                     ) { Text("Save palm ${palmDim?.let { "%.1f".format(it) } ?: ""}") }
+                }
+
+                Text("Palm rest zone", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Reserve an area of the canvas for your palm so it can never interfere " +
+                        "with writing. In Auto mode it follows where you write; you can also " +
+                        "drag the blue grip on the canvas to place it yourself.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SingleChoiceSegmentedButtonRow {
+                        PalmZoneMode.entries.forEachIndexed { index, mode ->
+                            SegmentedButton(
+                                selected = settings.palmZone.mode == mode,
+                                onClick = { scope.launch {
+                                    settingsRepository.updateSettings { palmZone = palmZone.copy(mode = mode) }
+                                } },
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = PalmZoneMode.entries.size),
+                            ) { Text(mode.name) }
+                        }
+                    }
+                }
+
+                if (settings.palmZone.mode == PalmZoneMode.AUTO) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SingleChoiceSegmentedButtonRow {
+                            PalmZoneSide.entries.forEachIndexed { index, side ->
+                                SegmentedButton(
+                                    selected = settings.palmZone.side == side,
+                                    onClick = { scope.launch {
+                                        settingsRepository.updateSettings { palmZone = palmZone.copy(side = side) }
+                                    } },
+                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = PalmZoneSide.entries.size),
+                                ) { Text(side.name) }
+                            }
+                        }
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val hasPalmContact = contacts.any { it.classification == ContactClassification.PALM }
+                    Button(
+                        enabled = hasPalmContact || measuringPalm,
+                        onClick = { measuringPalm = !measuringPalm }
+                    ) {
+                        Text(
+                            if (measuringPalm) {
+                                "Rest palm for 2s… peak ${"%.1f".format(palmPeakMm)} mm"
+                            } else {
+                                "Measure my palm"
+                            }
+                        )
+                    }
+                }
+                if (settings.palmZone.enabled) {
+                    Text(
+                        "Current zone: ${"%.0f".format(settings.palmZone.widthMm)} × " +
+                            "${"%.0f".format(settings.palmZone.heightMm)} mm · ${settings.palmZone.mode.name}" +
+                            (if (settings.palmZone.mode == PalmZoneMode.AUTO) " · ${settings.palmZone.side.name}" else ""),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
 
                 Text("Event: ${inputFrame?.action ?: "—"}  pointers: ${inputFrame?.pointerCount ?: 0}", style = MaterialTheme.typography.bodySmall)

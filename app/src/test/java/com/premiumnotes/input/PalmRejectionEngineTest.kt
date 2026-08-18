@@ -520,4 +520,62 @@ class PalmRejectionEngineTest {
         assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
         assertTrue(out.gesturePointerIds.isEmpty())
     }
+
+    // --- palm rest zone ---
+
+    private fun zonedEngine() = engine().also {
+        it.setPalmZoneRect(PalmZoneRect(leftPx = 200f, topPx = 200f, rightPx = 800f, bottomPx = 900f))
+    }
+
+    @Test
+    fun contactInsidePalmZoneIsAlwaysPalmEvenIfPenSized() {
+        val e = zonedEngine()
+        // A pen-sized contact whose center lands inside the reserved zone: the zone is
+        // authoritative, so even a clearly-small contact is the resting palm there.
+        val penSizedInZone = TestTouchFactory.pen(pointerId = 0, x = 400f, y = 400f, timeMs = 0L)
+        val out = e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(penSizedInZone), added = 0))
+        assertEquals(ContactClassification.PALM, out.contactFor(0)?.classification)
+        assertEquals(ClassificationReason.IN_PALM_ZONE, out.contactFor(0)?.reason)
+        assertNull(out.activeWritingPointerId)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    @Test
+    fun twoContactsInsideZoneNeverBecomeGesture() {
+        val e = zonedEngine()
+        val f1 = TestTouchFactory.fingertip(pointerId = 0, x = 300f, y = 300f, timeMs = 0L)
+        val f2 = TestTouchFactory.fingertip(pointerId = 1, x = 500f, y = 400f, timeMs = 0L)
+        val out = e.process(TestTouchFactory.frame(InputAction.POINTER_DOWN, 0L, listOf(f1, f2), added = 1))
+        assertEquals(ContactClassification.PALM, out.contactFor(0)?.classification)
+        assertEquals(ContactClassification.PALM, out.contactFor(1)?.classification)
+        assertNull(out.activeWritingPointerId)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    @Test
+    fun lockedWritingPointerCrossingZoneKeepsLockAndWrites() {
+        val e = zonedEngine()
+        // Pen starts OUTSIDE the zone and claims the lock.
+        e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.pen(0, x = 100f, y = 100f, timeMs = 0L)), added = 0))
+        // The stroke now moves INTO the zone: the locked pointer is exempt from the zone
+        // override so the in-progress stroke is not cut mid-stroke.
+        val intoZone = TestTouchFactory.pen(0, x = 400f, y = 400f, timeMs = 30L)
+        val out = e.process(TestTouchFactory.frame(InputAction.MOVE, 30L, listOf(intoZone)))
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    @Test
+    fun palmZoneRectGeometryContainsOnlyInsidePoints() {
+        val rect = PalmZoneRect(leftPx = 200f, topPx = 200f, rightPx = 800f, bottomPx = 900f)
+        assertTrue(rect.contains(400f, 400f))
+        assertTrue(rect.contains(200f, 200f)) // inclusive edges
+        assertTrue(!rect.contains(199f, 400f))
+        assertTrue(!rect.contains(400f, 901f))
+        assertEquals(500f, rect.centerX(), 0.001f)
+        assertEquals(550f, rect.centerY(), 0.001f)
+        assertEquals(600f, rect.widthPx(), 0.001f)
+        assertEquals(700f, rect.heightPx(), 0.001f)
+    }
 }

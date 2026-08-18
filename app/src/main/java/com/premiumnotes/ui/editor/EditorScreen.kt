@@ -393,6 +393,14 @@ fun EditorScreen(
                                 view.selectionBoundsMm = editorState!!.selectionBoundsMm
                                 view.listener = vm.canvasListener
                                 view.autoEraseEnabled = settings.autoEraseEnabled
+                                // Palm rest zone + scroll bar.
+                                view.palmZone = settings.palmZone
+                                view.scrollBarVisible = true
+                                view.onPalmZoneChanged = { zone ->
+                                    scope.launch {
+                                        app.container.settingsRepository.updateSettings { palmZone = zone }
+                                    }
+                                }
                             },
                             onRelease = { view -> view.finalizeActiveStroke() },
                         )

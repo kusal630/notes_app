@@ -13,6 +13,9 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.premiumnotes.input.CalibrationData
 import com.premiumnotes.input.PalmRejectionMode
 import com.premiumnotes.input.PalmRejectionSettings
+import com.premiumnotes.input.PalmZone
+import com.premiumnotes.input.PalmZoneMode
+import com.premiumnotes.input.PalmZoneSide
 import com.premiumnotes.input.SmoothingMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -47,6 +50,12 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val CALIBRATION_FINGER_KEY = floatPreferencesKey("calibration_finger")
         private val CALIBRATION_PEN_KEY = floatPreferencesKey("calibration_pen")
         private val CALIBRATION_PALM_KEY = floatPreferencesKey("calibration_palm")
+        private val PALM_ZONE_MODE_KEY = intPreferencesKey("palm_zone_mode")
+        private val PALM_ZONE_SIDE_KEY = intPreferencesKey("palm_zone_side")
+        private val PALM_ZONE_CX_KEY = floatPreferencesKey("palm_zone_cx")
+        private val PALM_ZONE_CY_KEY = floatPreferencesKey("palm_zone_cy")
+        private val PALM_ZONE_W_KEY = floatPreferencesKey("palm_zone_w")
+        private val PALM_ZONE_H_KEY = floatPreferencesKey("palm_zone_h")
     }
 
     val settingsFlow: Flow<PalmRejectionSettings> = dataStore.data
@@ -72,6 +81,12 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             current.calibration.fingerMaxDimMm?.let { prefs[CALIBRATION_FINGER_KEY] = it }
             current.calibration.penMaxDimMm?.let { prefs[CALIBRATION_PEN_KEY] = it }
             current.calibration.palmMaxDimMm?.let { prefs[CALIBRATION_PALM_KEY] = it }
+            prefs[PALM_ZONE_MODE_KEY] = current.palmZone.mode.ordinal
+            prefs[PALM_ZONE_SIDE_KEY] = current.palmZone.side.ordinal
+            prefs[PALM_ZONE_CX_KEY] = current.palmZone.centerXFrac
+            prefs[PALM_ZONE_CY_KEY] = current.palmZone.centerYFrac
+            prefs[PALM_ZONE_W_KEY] = current.palmZone.widthMm
+            prefs[PALM_ZONE_H_KEY] = current.palmZone.heightMm
         }
     }
 
@@ -99,5 +114,15 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             enableFingerWriting = prefs[FINGER_WRITING_KEY] ?: true,
             autoConvertHandwritingToText = prefs[AUTO_CONVERT_HANDWRITING_KEY] ?: false,
             autoEraseEnabled = prefs[AUTO_ERASE_KEY] ?: false,
+            palmZone = PalmZone(
+                mode = PalmZoneMode.entries.getOrNull(prefs[PALM_ZONE_MODE_KEY] ?: PalmZoneMode.OFF.ordinal)
+                    ?: PalmZoneMode.OFF,
+                side = PalmZoneSide.entries.getOrNull(prefs[PALM_ZONE_SIDE_KEY] ?: PalmZoneSide.LEFT.ordinal)
+                    ?: PalmZoneSide.LEFT,
+                centerXFrac = prefs[PALM_ZONE_CX_KEY] ?: 0.18f,
+                centerYFrac = prefs[PALM_ZONE_CY_KEY] ?: 0.72f,
+                widthMm = prefs[PALM_ZONE_W_KEY] ?: 72f,
+                heightMm = prefs[PALM_ZONE_H_KEY] ?: 60f,
+            ),
         )
 }

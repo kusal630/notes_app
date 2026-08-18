@@ -35,6 +35,11 @@ data class PalmRejectionSettings(
     var calibration: CalibrationData = CalibrationData(),
     var smoothing: SmoothingMode = SmoothingMode.MEDIUM,
     /**
+     * The user-reserved palm rest zone (see [PalmZone]). When enabled, contacts whose
+     * center lands inside the zone are unconditionally treated as the resting palm.
+     */
+    var palmZone: PalmZone = PalmZone(),
+    /**
      * Allows a bare finger to become the writing pointer while palm rejection stays
      * active: in WRITING/STRICT modes a finger-sized contact is accepted as writing,
      * and the writing lock still rejects any additional (palm) contact.

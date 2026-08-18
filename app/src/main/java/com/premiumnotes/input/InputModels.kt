@@ -121,6 +121,8 @@ enum class ClassificationReason {
     NO_GEOMETRY_INFO,
     FINGER_WRITING,
     MODE_STRICT_REJECT,
+    /** Contact fell inside the user-reserved palm rest zone. */
+    IN_PALM_ZONE,
 }
 
 data class ClassificationResult(

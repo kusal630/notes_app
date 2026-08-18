@@ -15,6 +15,8 @@ import com.premiumnotes.input.InputCapabilities
 import com.premiumnotes.input.InputFrame
 import com.premiumnotes.input.MotionEventParser
 import com.premiumnotes.input.PalmRejectionEngine
+import com.premiumnotes.input.PalmZone
+import com.premiumnotes.input.PalmZoneRect
 import com.premiumnotes.model.PageBackground
 import com.premiumnotes.model.PenStyle
 import com.premiumnotes.model.Point
@@ -124,6 +126,41 @@ class InkCanvasView @JvmOverloads constructor(
      *  is on the pen tool (Feature 1 auto-detection fired mid-gesture). */
     private var gestureEraseOverride = false
 
+    // --- palm rest zone (user-reserved region where the palm is always accepted) ---
+    var palmZone: PalmZone = PalmZone()
+        set(value) {
+            if (field != value) {
+                field = value
+                if (!value.enabled) {
+                    zoneDragging = false
+                    engine.setPalmZoneRect(null)
+                }
+                invalidate()
+            }
+        }
+
+    /** Called when the user drags the palm-zone grip so the position can be persisted. */
+    var onPalmZoneChanged: ((PalmZone) -> Unit)? = null
+
+    private var zoneDragging = false
+    private var zoneDragPointerId = -1
+    private var lastZoneRect: PalmZoneRect? = null
+    /** Screen position of the active writing pointer (for AUTO zone tracking). */
+    private var lastWritingScreenX = -1f
+    private var lastWritingScreenY = -1f
+
+    // --- scroll bar (visible page scroller on the right edge) ---
+    var scrollBarVisible: Boolean = true
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+    private var scrollDragging = false
+    private var scrollDragPointerId = -1
+    private val scrollBarWidthPx = 18f
+
     /** World-space bounding box of the current selection, set by the UI. */
     var selectionBoundsMm: RectF? = null
 
@@ -229,6 +266,16 @@ class InkCanvasView @JvmOverloads constructor(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val input = MotionEventParser.parse(event)
+
+        // The scroll bar and the palm-zone grip are direct-manipulation surfaces that
+        // must never feed the palm rejection / writing pipeline.
+        if (handleScrollBarTouch(input)) return true
+        if (handleZoneGripTouch(input)) return true
+
+        // Keep the engine's zone in sync with this frame before it classifies anything.
+        lastZoneRect = computePalmZoneRect()
+        engine.setPalmZoneRect(lastZoneRect)
+
         val classified = engine.process(input)
 
         // A new gesture always starts clean: clear any erase-override from a previous
@@ -265,6 +312,208 @@ class InkCanvasView @JvmOverloads constructor(
         return true
     }
 
+    // --- palm rest zone + scroll bar: geometry and direct manipulation ---
+
+    /**
+     * Resolves the configured palm zone to screen pixels for the current frame.
+     * - AUTO: follows the active writing pointer (palm side chosen by handedness) and
+     *   anchors to a bottom corner when idle.
+     * - MANUAL: fixed fractional position.
+     * Returns null when the zone is disabled.
+     */
+    private fun computePalmZoneRect(): PalmZoneRect? {
+        if (!palmZone.enabled) return null
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val zW = palmZone.widthMm * capabilities.pxPerMm
+        val zH = palmZone.heightMm * capabilities.pxPerMm
+        val gap = 6f * capabilities.pxPerMm
+
+        val cx: Float
+        val cy: Float
+        when (palmZone.mode) {
+            com.premiumnotes.input.PalmZoneMode.AUTO -> {
+                if (lastWritingScreenX >= 0f && lastWritingScreenY >= 0f) {
+                    // Place the palm beside and below where the user is currently writing.
+                    val desiredX = if (palmZone.side == com.premiumnotes.input.PalmZoneSide.LEFT) {
+                        lastWritingScreenX - zW / 2f - gap
+                    } else {
+                        lastWritingScreenX + zW / 2f + gap
+                    }
+                    val desiredY = lastWritingScreenY + zH / 2f + gap
+                    cx = desiredX.coerceIn(zW / 2f, w - zW / 2f)
+                    cy = desiredY.coerceIn(zH / 2f, h - zH / 2f)
+                } else {
+                    // Idle: anchor to the bottom corner on the palm side.
+                    val mx = 8f * capabilities.pxPerMm
+                    cx = if (palmZone.side == com.premiumnotes.input.PalmZoneSide.LEFT) {
+                        zW / 2f + mx
+                    } else {
+                        w - zW / 2f - mx
+                    }
+                    cy = h - zH / 2f - mx
+                }
+            }
+            com.premiumnotes.input.PalmZoneMode.MANUAL -> {
+                cx = palmZone.centerXFrac * w
+                cy = palmZone.centerYFrac * h
+            }
+            else -> return null
+        }
+        return PalmZoneRect(cx - zW / 2f, cy - zH / 2f, cx + zW / 2f, cy + zH / 2f)
+    }
+
+    /** The grip handle the user grabs to reposition the zone (its top-center). */
+    private fun zoneGripCenter(): com.premiumnotes.model.Point? {
+        val rect = lastZoneRect ?: return null
+        return com.premiumnotes.model.Point(rect.centerX(), rect.topPx)
+    }
+
+    private fun handleZoneGripTouch(input: InputFrame): Boolean {
+        if (!palmZone.enabled || zoneDragging) {
+            // Still need to end a drag started earlier.
+        }
+        when (input.action) {
+            com.premiumnotes.input.InputAction.DOWN,
+            com.premiumnotes.input.InputAction.POINTER_DOWN,
+            -> {
+                if (palmZone.enabled) {
+                    val grip = zoneGripCenter()
+                    val added = input.addedPointerId?.let { id ->
+                        input.contacts.firstOrNull { it.pointerId == id }
+                    }
+                    if (grip != null && added != null &&
+                        hypot(added.x - grip.x, added.y - grip.y) <= 36f
+                    ) {
+                        zoneDragging = true
+                        zoneDragPointerId = added.pointerId
+                        // Grabbing the grip converts the zone to a fixed manual position.
+                        if (palmZone.mode != com.premiumnotes.input.PalmZoneMode.MANUAL) {
+                            val rect = lastZoneRect ?: computePalmZoneRect()
+                            if (rect != null) {
+                                setPalmZonePos(rect.centerX() / width.toFloat(), rect.centerY() / height.toFloat())
+                            }
+                        }
+                        return true
+                    }
+                }
+            }
+            com.premiumnotes.input.InputAction.MOVE -> {
+                if (zoneDragging) {
+                    val contact = input.contacts.firstOrNull { it.pointerId == zoneDragPointerId } ?: return true
+                    val w = width.toFloat()
+                    val h = height.toFloat()
+                    if (w > 0f && h > 0f) {
+                        setPalmZonePos(contact.x / w, contact.y / h)
+                    }
+                    return true
+                }
+            }
+            com.premiumnotes.input.InputAction.UP,
+            com.premiumnotes.input.InputAction.POINTER_UP,
+            -> {
+                if (zoneDragging && input.liftedPointerId == zoneDragPointerId) {
+                    zoneDragging = false
+                    zoneDragPointerId = -1
+                    onPalmZoneChanged?.invoke(palmZone)
+                    return true
+                }
+            }
+            com.premiumnotes.input.InputAction.CANCEL -> {
+                if (zoneDragging) {
+                    zoneDragging = false
+                    zoneDragPointerId = -1
+                    return true
+                }
+            }
+            else -> Unit
+        }
+        return false
+    }
+
+    /** Updates the zone center (fractions) and switches it to manual positioning. */
+    private fun setPalmZonePos(cxFrac: Float, cyFrac: Float) {
+        palmZone = palmZone.movedTo(cxFrac, cyFrac)
+        lastZoneRect = computePalmZoneRect()
+        engine.setPalmZoneRect(lastZoneRect)
+        invalidate()
+    }
+
+    private fun handleScrollBarTouch(input: InputFrame): Boolean {
+        if (!scrollBarVisible && !scrollDragging) return false
+        when (input.action) {
+            com.premiumnotes.input.InputAction.DOWN,
+            com.premiumnotes.input.InputAction.POINTER_DOWN,
+            -> {
+                val added = input.addedPointerId?.let { id ->
+                    input.contacts.firstOrNull { it.pointerId == id }
+                } ?: return false
+                if (added.x >= width.toFloat() - scrollBarWidthPx) {
+                    scrollDragging = true
+                    scrollDragPointerId = added.pointerId
+                    scrollToDragY(added.y)
+                    return true
+                }
+            }
+            com.premiumnotes.input.InputAction.MOVE -> {
+                if (scrollDragging) {
+                    val contact = input.contacts.firstOrNull { it.pointerId == scrollDragPointerId }
+                    if (contact != null) scrollToDragY(contact.y)
+                    return true
+                }
+            }
+            com.premiumnotes.input.InputAction.UP,
+            com.premiumnotes.input.InputAction.POINTER_UP,
+            -> {
+                if (scrollDragging && input.liftedPointerId == scrollDragPointerId) {
+                    scrollDragging = false
+                    scrollDragPointerId = -1
+                    return true
+                }
+            }
+            com.premiumnotes.input.InputAction.CANCEL -> {
+                if (scrollDragging) {
+                    scrollDragging = false
+                    scrollDragPointerId = -1
+                    return true
+                }
+            }
+            else -> Unit
+        }
+        return false
+    }
+
+    /** Maps a drag Y on the scroll bar to a viewport offset and scrolls the page. */
+    private fun scrollToDragY(yPx: Float) {
+        val extentMm = contentExtentMm()
+        val h = height.toFloat()
+        if (h <= 0f || scale <= 0f) return
+        val worldTop = (yPx / h) * extentMm
+        offsetY = (worldTop * scale).coerceIn(0f, (extentMm * scale - h).coerceAtLeast(0f))
+        listener?.onViewportChanged(zoom, offsetX, offsetY)
+        invalidate()
+    }
+
+    /** Bottom edge of all page content in world mm (used to size the scroll bar). */
+    private fun contentExtentMm(): Float {
+        var maxY = 0f
+        for (stroke in strokes) {
+            val pts = stroke.pointsPacked
+            var i = 1
+            while (i < pts.size) {
+                if (pts[i] > maxY) maxY = pts[i]
+                i += 2
+            }
+        }
+        for (shape in shapes) {
+            for (p in shape.points) {
+                if (p.y > maxY) maxY = p.y
+            }
+        }
+        // A short/empty page still gets a scrollable extent so the bar behaves predictably.
+        return (maxY + 80f).coerceAtLeast(500f)
+    }
+
     // --- writing ---
 
     private var writingPointerId: Int = -1
@@ -275,6 +524,8 @@ class InkCanvasView @JvmOverloads constructor(
             com.premiumnotes.input.InputAction.POINTER_UP,
             -> {
                 if (input.liftedPointerId == writingPointerId) {
+                    lastWritingScreenX = -1f
+                    lastWritingScreenY = -1f
                     val builder = strokeBuilder
                     strokeBuilder = null
                     writingPointerId = -1
@@ -327,6 +578,8 @@ class InkCanvasView @JvmOverloads constructor(
                 }
                 val writingId = classified.activeWritingPointerId ?: return
                 val contact = classified.contactFor(writingId) ?: return
+                lastWritingScreenX = contact.contact.x
+                lastWritingScreenY = contact.contact.y
                 when (input.action) {
                     com.premiumnotes.input.InputAction.DOWN,
                     com.premiumnotes.input.InputAction.POINTER_DOWN,
@@ -982,6 +1235,60 @@ class InkCanvasView @JvmOverloads constructor(
             }
             canvas.drawRect(lasso, lassoFillPaint)
             canvas.drawRect(lasso, lassoStrokePaint)
+        }
+
+        // Palm rest zone: a translucent reserved region so the user can see exactly where
+        // to rest their hand. The grip handle at the top-center can be dragged to move it.
+        lastZoneRect?.let { zone ->
+            val zonePaint = Paint().apply {
+                style = Paint.Style.FILL
+                color = 0x1A2E5BFF.toInt()
+            }
+            val zoneStroke = Paint().apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 2f
+                color = 0x662E5BFF.toInt()
+            }
+            canvas.drawRect(zone.leftPx, zone.topPx, zone.rightPx, zone.bottomPx, zonePaint)
+            canvas.drawRect(zone.leftPx, zone.topPx, zone.rightPx, zone.bottomPx, zoneStroke)
+            canvas.drawText(
+                "PALM REST",
+                zone.leftPx + 8f,
+                zone.topPx + 22f,
+                Paint().apply {
+                    textSize = 14f
+                    color = 0x882E5BFF.toInt()
+                }
+            )
+            // Grip handle.
+            val gx = zone.centerX()
+            val gy = zone.topPx
+            canvas.drawCircle(gx, gy, 18f, Paint().apply {
+                style = Paint.Style.FILL
+                color = 0xFF2E5BFF.toInt()
+            })
+            canvas.drawCircle(gx, gy, 6f, Paint().apply {
+                style = Paint.Style.FILL
+                color = 0xFFFFFFFF.toInt()
+            })
+        }
+
+        // Scroll bar: a thin track on the right edge with a thumb sized to the viewport.
+        if (scrollBarVisible) {
+            val extentMm = contentExtentMm()
+            val barLeft = w - scrollBarWidthPx
+            canvas.drawRoundRect(
+                barLeft, 0f, w, h, 4f, 4f,
+                Paint().apply { color = 0x14333333.toInt() },
+            )
+            val viewHeightMm = h / scale
+            val topWorld = offsetY / scale
+            val thumbH = (viewHeightMm / extentMm * h).coerceIn(24f, h)
+            val thumbY = (topWorld / extentMm * h).coerceIn(0f, h - thumbH)
+            canvas.drawRoundRect(
+                barLeft + 2f, thumbY, w - 2f, thumbY + thumbH, 6f, 6f,
+                Paint().apply { color = 0x662E5BFF.toInt() },
+            )
         }
     }
 }

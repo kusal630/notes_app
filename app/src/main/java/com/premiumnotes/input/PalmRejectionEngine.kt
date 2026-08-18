@@ -24,6 +24,16 @@ class PalmRejectionEngine(
     private var lock = WritingLock(currentSettings.writingHoldoffMs)
     private var lastKnownHoldoffMs = currentSettings.writingHoldoffMs
 
+    /**
+     * The user-reserved palm rest zone resolved to screen pixels, or null when disabled.
+     * Updated by the canvas every frame (it knows the zone and its own size).
+     */
+    private var palmZoneRect: PalmZoneRect? = null
+
+    fun setPalmZoneRect(rect: PalmZoneRect?) {
+        palmZoneRect = rect
+    }
+
     fun reset() {
         lock.reset(System.nanoTime())
         pointerStates.clear()
@@ -58,6 +68,28 @@ class PalmRejectionEngine(
         val classified = mutableListOf<ClassifiedContact>()
         for (contact in normalized) {
             val state = pointerStates[contact.pointerId]
+
+            // The user-reserved palm rest zone is authoritative: any contact whose center
+            // falls inside it is the resting palm. It can never be the writer and can never
+            // drive a gesture, regardless of size/tool-type signals (the zone is explicitly
+            // set aside for the palm). An already-locked writing pointer is exempt so an
+            // in-progress stroke crossing the zone is not cut mid-stroke.
+            val inZone = palmZoneRect?.contains(contact.x, contact.y) == true
+            if (inZone && lock.activePointerId != contact.pointerId) {
+                val classifiedContact = ClassifiedContact(
+                    contact = contact,
+                    classification = ContactClassification.PALM,
+                    confidence = 1f,
+                    reason = ClassificationReason.IN_PALM_ZONE,
+                    effectiveThresholdMm = 0f,
+                    speedMmPerSec = state?.speedMmPerSec ?: 0f,
+                    durationMs = state?.let { (nowNanos - it.downTimeNanos) / 1_000_000L } ?: 0L,
+                )
+                classified += classifiedContact
+                classifier.updateHistory(classifiedContact)
+                continue
+            }
+
             val result = classifier.classify(
                 contact,
                 PalmClassifier.ClassifyContext(
