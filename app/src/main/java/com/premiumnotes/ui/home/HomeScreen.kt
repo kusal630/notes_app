@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Science
@@ -34,6 +36,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -49,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.premiumnotes.data.NotesRepository
 import com.premiumnotes.model.Notebook
+import com.premiumnotes.model.NoteType
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,6 +70,9 @@ fun HomeScreen(
 
     var showNewDialog by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Notebook?>(null) }
+
+    // Which note type to show: null = all, otherwise only that type.
+    var filter by remember { mutableStateOf<NoteType?>(null) }
 
     Scaffold(
         topBar = {
@@ -81,64 +90,87 @@ fun HomeScreen(
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { showNewDialog = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "New notebook")
+                Icon(Icons.Filled.Add, contentDescription = "New note")
             }
         }
     ) { padding ->
-        val visible = notebooks.filterNot { it.isArchived }
-        if (visible.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No notebooks yet", style = MaterialTheme.typography.titleLarge)
-                    Text("Tap + to create your first notebook")
-                }
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            // Two note types, side by side: normal handwritten notes and classroom notes
+            // (the same canvas plus an on-device audio transcript sidebar).
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                listOf<NoteType?>(null, NoteType.NORMAL, NoteType.CLASSROOM)
+                    .forEachIndexed { index, type ->
+                        SegmentedButton(
+                            selected = filter == type,
+                            onClick = { filter = type },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
+                        ) { Text(type?.let { if (it == NoteType.CLASSROOM) "Classroom" else "Normal" } ?: "All") }
+                    }
             }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(220.dp),
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                items(visible, key = { it.id }) { nb ->
-                    NotebookCard(
-                        notebook = nb,
-                        onClick = { onOpenNotebook(nb.id) },
-                        onEdit = { editing = nb },
-                        onDelete = {
-                            scope.launch { repository.deleteNotebook(nb.id) }
-                        },
-                        onToggleFavorite = {
-                            scope.launch { repository.toggleFavorite(nb.id) }
-                        },
-                        onArchive = {
-                            scope.launch { repository.setArchived(nb.id, true) }
-                        }
-                    )
+
+            val visible = notebooks
+                .filterNot { it.isArchived }
+                .filter { filter == null || it.type == filter }
+
+            if (visible.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("No notes here yet", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            if (filter == NoteType.CLASSROOM)
+                                "Tap + to create a classroom note — write by hand and record " +
+                                    "the lecture into the sidebar."
+                            else "Tap + to create your first note"
+                        )
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(220.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    items(visible, key = { it.id }) { nb ->
+                        NotebookCard(
+                            notebook = nb,
+                            onClick = { onOpenNotebook(nb.id) },
+                            onEdit = { editing = nb },
+                            onDelete = {
+                                scope.launch { repository.deleteNotebook(nb.id) }
+                            },
+                            onToggleFavorite = {
+                                scope.launch { repository.toggleFavorite(nb.id) }
+                            },
+                            onArchive = {
+                                scope.launch { repository.setArchived(nb.id, true) }
+                            }
+                        )
+                    }
                 }
             }
         }
     }
 
     if (showNewDialog) {
-        TitleDialog(
-            title = "New notebook",
-            initial = "",
-            confirm = "Create",
+        NewNoteDialog(
             onDismiss = { showNewDialog = false },
-            onConfirm = { name ->
-                scope.launch { repository.createNotebook(name) }
+            onConfirm = { name, type ->
+                scope.launch {
+                    val id = repository.createNotebook(name, type)
+                    // A new classroom note opens straight into the canvas with the audio
+                    // sidebar ready to record; a normal note stays on the home screen.
+                    if (type == NoteType.CLASSROOM) onOpenNotebook(id)
+                }
                 showNewDialog = false
             }
         )
     }
 
     editing?.let { nb ->
-        TitleDialog(
-            title = "Rename notebook",
+        RenameDialog(
             initial = nb.title,
-            confirm = "Rename",
             onDismiss = { editing = null },
             onConfirm = { name ->
                 scope.launch { repository.renameNotebook(nb.id, name) }
@@ -189,28 +221,86 @@ private fun NotebookCard(
                 }
             }
             Spacer(Modifier.size(4.dp))
-            Text("${notebook.pageCount} pages", style = MaterialTheme.typography.bodySmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${notebook.pageCount} pages", style = MaterialTheme.typography.bodySmall)
+                if (notebook.type == NoteType.CLASSROOM) {
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        Icons.Filled.Mic,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    Text(
+                        "Classroom",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun TitleDialog(
-    title: String,
+private fun NewNoteDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, type: NoteType) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var type by remember { mutableStateOf(NoteType.NORMAL) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New note") },
+        text = {
+            Column {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") })
+                Spacer(Modifier.height(12.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    NoteType.entries.forEachIndexed { index, t ->
+                        SegmentedButton(
+                            selected = type == t,
+                            onClick = { type = t },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = NoteType.entries.size),
+                        ) { Text(if (t == NoteType.CLASSROOM) "Classroom" else "Normal") }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (type == NoteType.CLASSROOM)
+                        "A classroom note opens the handwriting canvas plus an on-device " +
+                            "audio transcript sidebar where you can record and summarize the lecture."
+                    else "A normal handwritten note — the classic notebook experience.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name, type) }) { Text("Create") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun RenameDialog(
     initial: String,
-    confirm: String,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
     var value by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = { Text("Rename note") },
         text = {
             OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text("Name") })
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(value) }) { Text(confirm) }
+            TextButton(onClick = { onConfirm(value) }) { Text("Rename") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

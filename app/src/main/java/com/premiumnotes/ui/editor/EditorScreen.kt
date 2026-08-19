@@ -105,6 +105,7 @@ import com.premiumnotes.input.PalmRejectionEngine
 import com.premiumnotes.input.PalmRejectionMode
 import com.premiumnotes.input.PalmRejectionSettings
 import com.premiumnotes.input.SmoothingMode
+import com.premiumnotes.model.NoteType
 import com.premiumnotes.model.PageBackground
 import com.premiumnotes.model.PageSummary
 import com.premiumnotes.model.PenStyle
@@ -114,6 +115,7 @@ import com.premiumnotes.model.TranscriptSegment
 import com.premiumnotes.speech.AudioCaptureService
 import com.premiumnotes.speech.ModelDiscovery
 import com.premiumnotes.speech.SpeechController
+import com.premiumnotes.speech.SummaryGenerator
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -220,6 +222,14 @@ fun EditorScreen(
 
     // The page rail is a hideable overlay so the canvas stays full-screen for writing.
     var showRail by remember { mutableStateOf(false) }
+
+    // A classroom note is a normal note plus the on-device audio/transcript sidebar.
+    // Opening one shows the sidebar from the start (with a "record" hint) so the feature
+    // is discoverable; a normal note only shows it once a recording is started.
+    var isClassroom by remember { mutableStateOf(false) }
+    LaunchedEffect(notebookId) {
+        isClassroom = repository.getNotebook(notebookId)?.type == NoteType.CLASSROOM
+    }
 
     // --- Classroom Notes (Feature 2): on-device recording + transcript sidebar. ---
     val transcript by SpeechController.segments.collectAsState()
@@ -429,19 +439,26 @@ fun EditorScreen(
                 }
 
                 // Classroom Notes transcript sidebar: a sibling of the canvas so it never
-                // steals the pen's touches. Visible whenever a recording session exists
-                // for this page (live during recording, static when reopened).
-                val showTranscript = transcript.isNotEmpty() || partial.isNotEmpty() || isRecording
+                // steals the pen's touches. Visible for classroom notes from the start
+                // (live during recording, static when reopened), otherwise whenever a
+                // recording session exists for this page.
+                val showTranscript = isClassroom ||
+                    transcript.isNotEmpty() || partial.isNotEmpty() || isRecording
                 if (showTranscript) {
                     HorizontalDivider(
                         modifier = Modifier.width(1.dp).fillMaxHeight(),
                         color = MaterialTheme.colorScheme.outlineVariant,
                     )
-                    TranscriptPanel(
+                    ClassroomSidebar(
                         segments = transcript,
                         partial = if (isRecording) partial else "",
                         isRecording = isRecording,
                         onStopRecording = { AudioCaptureService.stop(uiContext) },
+                        summary = content.summary,
+                        summaryEnabled = transcript.isNotEmpty(),
+                        onGenerateSummary = {
+                            vm.setSummary(SummaryGenerator.summarize(transcript))
+                        },
                         modifier = Modifier.widthIn(min = 220.dp, max = 320.dp).fillMaxHeight(),
                     )
                 }
@@ -521,23 +538,30 @@ private fun EditorTopBar(
 }
 
 /**
- * Live (or saved) Classroom Notes transcript. A sibling of the canvas — never an overlay
- * on top of it — so pen input is never stolen. Auto-scrolls while recording so the newest
- * recognized words stay visible; static text otherwise.
+ * The Classroom Notes sidebar: a sibling of the canvas — never an overlay on top of it —
+ * so pen input is never stolen. Organized as tabs so new features (notes, highlights,
+ * export, …) slot in next to the transcript without redesigning the layout.
+ *
+ * - Transcript: live (or saved) recognized speech; auto-scrolls while recording.
+ * - Summary: an on-device extractive summary of the transcript, generated on request.
  */
 @Composable
-private fun TranscriptPanel(
+private fun ClassroomSidebar(
     segments: List<TranscriptSegment>,
     partial: String,
     isRecording: Boolean,
     onStopRecording: () -> Unit,
+    summary: String?,
+    summaryEnabled: Boolean,
+    onGenerateSummary: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var tab by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
     Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.fillMaxSize().padding(12.dp)) {
             Text(
-                text = if (isRecording) "Classroom · recording" else "Classroom transcript",
+                text = if (isRecording) "Classroom · recording" else "Classroom notes",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -558,68 +582,135 @@ private fun TranscriptPanel(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            if (segments.isEmpty() && partial.isBlank()) {
-                Text(
-                    "No speech yet. Speak naturally — recognized words appear here.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    items(segments, key = { it.id }) { seg ->
+
+            // Tabs: Transcript | Summary — extensible surface for future features.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                SidebarTab(label = "Transcript", selected = tab == 0, onClick = { tab = 0 }, modifier = Modifier.weight(1f))
+                SidebarTab(label = "Summary", selected = tab == 1, onClick = { tab = 1 }, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(8.dp))
+
+            when (tab) {
+                0 -> {
+                    if (segments.isEmpty() && partial.isBlank()) {
+                        Text(
+                            if (isRecording) {
+                                "No speech yet. Speak naturally — recognized words appear here."
+                            } else {
+                                "No transcript yet. Tap the mic in the top bar to record " +
+                                    "and transcribe on-device."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(segments, key = { it.id }) { seg ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface,
+                                    shape = RoundedCornerShape(8.dp),
+                                ) {
+                                    Text(
+                                        seg.text,
+                                        modifier = Modifier.padding(8.dp),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                            }
+                            if (isRecording && partial.isNotBlank()) {
+                                item(key = "partial") {
+                                    Text(
+                                        partial,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                        LaunchedEffect(segments.size, partial) {
+                            if (isRecording) listState.animateScrollToItem(listState.layoutInfo.totalItemsCount)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onStopRecording,
+                        enabled = isRecording,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.Mic, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Stop recording")
+                    }
+                }
+                1 -> {
+                    if (summary != null) {
                         Surface(
                             color = MaterialTheme.colorScheme.surface,
                             shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f, fill = false),
                         ) {
                             Text(
-                                seg.text,
+                                summary,
                                 modifier = Modifier.padding(8.dp),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
+                        Spacer(Modifier.height(8.dp))
+                    } else if (segments.isEmpty()) {
+                        Text(
+                            "No transcript yet — record a lecture first, then generate a " +
+                                "summary on-device.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Text(
+                            "A summary has not been generated yet. Tap below to condense the " +
+                                "transcript on-device (no network).",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
                     }
-                    if (isRecording && partial.isNotBlank()) {
-                        item(key = "partial") {
-                            Text(
-                                partial,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = onGenerateSummary,
+                        enabled = summaryEnabled,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.Summarize, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (summary != null) "Regenerate summary" else "Generate summary")
                     }
-                }
-                LaunchedEffect(segments.size, partial) {
-                    if (isRecording) listState.animateScrollToItem(listState.layoutInfo.totalItemsCount)
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = onStopRecording,
-                    enabled = isRecording,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Filled.Mic, contentDescription = null)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Stop")
-                }
-                // Summarization is planned; the button is intentionally disabled and
-                // non-clickable so no dead interaction is promised.
-                Button(
-                    onClick = { /* TODO(feature 4): on-device transcript summarization */ },
-                    enabled = false,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Filled.Summarize, contentDescription = null)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Summarize")
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SidebarTab(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surface
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

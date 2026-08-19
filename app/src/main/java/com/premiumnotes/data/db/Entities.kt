@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 data class NotebookEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val title: String,
+    /** [com.premiumnotes.model.NoteType] name, stored as text for readability. */
+    val type: String = "NORMAL",
     val isFavorite: Boolean = false,
     val isArchived: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),

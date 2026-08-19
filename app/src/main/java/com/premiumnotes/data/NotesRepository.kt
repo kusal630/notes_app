@@ -1,6 +1,7 @@
 package com.premiumnotes.data
 
 import com.premiumnotes.model.Notebook
+import com.premiumnotes.model.NoteType
 import com.premiumnotes.model.PageContent
 import com.premiumnotes.model.PageSummary
 import kotlinx.coroutines.flow.Flow
@@ -13,7 +14,7 @@ import kotlinx.coroutines.flow.Flow
 interface NotesRepository {
     val notebooks: Flow<List<Notebook>>
 
-    suspend fun createNotebook(title: String): Long
+    suspend fun createNotebook(title: String, type: NoteType = NoteType.NORMAL): Long
     suspend fun renameNotebook(id: Long, title: String)
     suspend fun deleteNotebook(id: Long)
     suspend fun duplicateNotebook(id: Long): Long

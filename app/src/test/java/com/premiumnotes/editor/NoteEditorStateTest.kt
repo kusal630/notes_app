@@ -468,4 +468,22 @@ class NoteEditorStateTest {
         val reapplied = s.content.value.shapeObjects.first { it.id == 1L }.points
         assertEquals(resized[1].x, reapplied[1].x, 0.001f)
     }
+
+    @Test
+    fun setTranscriptReplacesContentAndSummaryPersists() {
+        val s = state()
+        val segments = listOf(
+            com.premiumnotes.model.TranscriptSegment(1L, 0L, 1500L, "hello class"),
+            com.premiumnotes.model.TranscriptSegment(2L, 1500L, 3200L, "today we cover algebra"),
+        )
+        s.setTranscript(segments)
+        assertEquals(2, s.content.value.transcript.size)
+        assertEquals("today we cover algebra", s.content.value.transcript[1].text)
+
+        s.setSummary("Algebra lecture")
+        assertEquals("Algebra lecture", s.content.value.summary)
+
+        s.setSummary(null)
+        assertEquals(null, s.content.value.summary)
+    }
 }

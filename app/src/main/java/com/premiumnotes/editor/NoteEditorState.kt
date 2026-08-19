@@ -120,6 +120,11 @@ class NoteEditorState(
         ids.accumulateAndGet(transcript.maxOfOrNull { it.id } ?: 0L) { c, m -> maxOf(c, m) }
     }
 
+    /** Replaces the Classroom Notes summary (generated on-device, persisted via autosave). */
+    fun setSummary(summary: String?) {
+        _content.value = _content.value.copy(summary = summary)
+    }
+
     fun nextId(): Long = ids.incrementAndGet()
 
     /** Applies a command, records it for undo, clears redo. */

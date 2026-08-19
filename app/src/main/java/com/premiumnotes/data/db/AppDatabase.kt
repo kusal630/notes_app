@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [NotebookEntity::class, PageEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,9 +26,15 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "premium_notes.db",
                 )
+                    .addMigrations(MIGRATION_1_2)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { instance = it }
             }
+
+        /** v1 → v2: notebooks gain a note-type column (NORMAL/CLASSROOM). */
+        val MIGRATION_1_2 = androidx.room.migration.Migration(1, 2) { db ->
+            db.execSQL("ALTER TABLE notebooks ADD COLUMN type TEXT NOT NULL DEFAULT 'NORMAL'")
+        }
     }
 }

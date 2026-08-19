@@ -3,6 +3,7 @@ package com.premiumnotes.data
 import android.content.Context
 import androidx.room.Room
 import com.premiumnotes.data.db.AppDatabase
+import com.premiumnotes.model.NoteType
 import com.premiumnotes.model.PageContent
 import com.premiumnotes.model.PenStyle
 import com.premiumnotes.model.Stroke
@@ -47,6 +48,29 @@ class RoomNotesRepositoryTest {
         assertEquals(1, list.size)
         assertEquals("Math", list[0].title)
         assertEquals(0, list[0].pageCount)
+    }
+
+    @Test
+    fun createNotebookDefaultsToNormalType() = runBlocking {
+        val id = repo.createNotebook("Notes")
+        assertEquals(NoteType.NORMAL, repo.getNotebook(id)?.type)
+    }
+
+    @Test
+    fun createClassroomNotebookRoundTripsType() = runBlocking {
+        val id = repo.createNotebook("Biology", NoteType.CLASSROOM)
+        val nb = repo.getNotebook(id)
+        assertEquals(NoteType.CLASSROOM, nb?.type)
+        // The type shows up in the catalog flow too.
+        assertEquals(NoteType.CLASSROOM, repo.notebooks.first().firstOrNull { it.id == id }?.type)
+    }
+
+    @Test
+    fun duplicateNotebookPreservesType() = runBlocking {
+        val id = repo.createNotebook("Lecture", NoteType.CLASSROOM)
+        val copyId = repo.duplicateNotebook(id)
+        assertTrue(copyId > 0)
+        assertEquals(NoteType.CLASSROOM, repo.getNotebook(copyId)?.type)
     }
 
     @Test

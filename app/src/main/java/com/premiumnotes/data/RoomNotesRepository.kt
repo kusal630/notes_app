@@ -6,6 +6,7 @@ import com.premiumnotes.data.db.NotebookEntity
 import com.premiumnotes.data.db.PageDao
 import com.premiumnotes.data.db.PageEntity
 import com.premiumnotes.model.Notebook
+import com.premiumnotes.model.NoteType
 import com.premiumnotes.model.PageBackground
 import com.premiumnotes.model.PageContent
 import com.premiumnotes.model.PageSummary
@@ -30,8 +31,8 @@ class RoomNotesRepository(db: AppDatabase) : NotesRepository {
             rows.map { it.notebook.toModel(pageCount = it.pageCount) }
         }
 
-    override suspend fun createNotebook(title: String): Long =
-        notebookDao.insert(NotebookEntity(title = title))
+    override suspend fun createNotebook(title: String, type: NoteType): Long =
+        notebookDao.insert(NotebookEntity(title = title, type = type.name))
 
     override suspend fun renameNotebook(id: Long, title: String) =
         notebookDao.rename(id, title)
@@ -129,6 +130,7 @@ class RoomNotesRepository(db: AppDatabase) : NotesRepository {
         Notebook(
             id = id,
             title = title,
+            type = runCatching { NoteType.valueOf(type) }.getOrDefault(NoteType.NORMAL),
             isFavorite = isFavorite,
             isArchived = isArchived,
             createdAt = createdAt,

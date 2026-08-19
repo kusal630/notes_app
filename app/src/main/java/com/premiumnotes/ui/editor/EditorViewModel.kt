@@ -126,6 +126,7 @@ class EditorViewModel(
     fun setShapeKind(kind: ShapeKind) = _editor.value?.setShapeKind(kind)
     fun setTranscript(segments: List<com.premiumnotes.model.TranscriptSegment>) =
         _editor.value?.setTranscript(segments)
+    fun setSummary(summary: String?) = _editor.value?.setSummary(summary)
     fun undo() = _editor.value?.undo()
     fun redo() = _editor.value?.redo()
 

@@ -1,9 +1,19 @@
 package com.premiumnotes.model
 
+/** The kind of notebook a note belongs to. */
+enum class NoteType {
+    /** A regular handwritten note (no audio/transcript). */
+    NORMAL,
+
+    /** A classroom note: the usual canvas plus an on-device audio transcript sidebar. */
+    CLASSROOM,
+}
+
 /** Catalog-level notebook record (mirrors the eventual Room entity). */
 data class Notebook(
     val id: Long = 0L,
     val title: String,
+    val type: NoteType = NoteType.NORMAL,
     val isFavorite: Boolean = false,
     val isArchived: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
