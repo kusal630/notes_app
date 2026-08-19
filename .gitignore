@@ -12,3 +12,11 @@ app/schemas/
 *.apk
 *.aab
 /gradle/gradle-daemon-jvm.properties
+
+# Vosk speech model — populated at build time by the downloadVoskModel Gradle task
+# (~40 MB, Apache-2.0). Only the README.txt placeholder is kept in version control.
+app/src/main/assets/vosk/model/am/
+app/src/main/assets/vosk/model/conf/
+app/src/main/assets/vosk/model/graph/
+app/src/main/assets/vosk/model/ivector/
+app/src/main/assets/vosk/model/README

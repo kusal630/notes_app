@@ -310,7 +310,6 @@ fun EditorScreen(
                     }
                 },
                 isRecording = isRecording && recordingPageId == pageId,
-                classroomAvailable = classroomAvailable,
                 onToggleClassroom = toggleClassroom,
             )
         },
@@ -453,7 +452,7 @@ fun EditorScreen(
                         segments = transcript,
                         partial = if (isRecording) partial else "",
                         isRecording = isRecording,
-                        onStopRecording = { AudioCaptureService.stop(uiContext) },
+                        onToggleRecording = toggleClassroom,
                         summary = content.summary,
                         summaryEnabled = transcript.isNotEmpty(),
                         onGenerateSummary = {
@@ -498,7 +497,6 @@ private fun EditorTopBar(
     onToggleRail: () -> Unit,
     onExportPdf: () -> Unit,
     isRecording: Boolean,
-    classroomAvailable: Boolean,
     onToggleClassroom: () -> Unit,
 ) {
     TopAppBar(
@@ -525,7 +523,8 @@ private fun EditorTopBar(
             }
             IconButton(
                 onClick = onToggleClassroom,
-                enabled = classroomAvailable || isRecording,
+                // Always tappable: without a bundled model the tap surfaces the "speech
+                // model not installed" notice instead of being silently disabled.
             ) {
                 Icon(
                     Icons.Filled.Mic,
@@ -550,7 +549,7 @@ private fun ClassroomSidebar(
     segments: List<TranscriptSegment>,
     partial: String,
     isRecording: Boolean,
-    onStopRecording: () -> Unit,
+    onToggleRecording: () -> Unit,
     summary: String?,
     summaryEnabled: Boolean,
     onGenerateSummary: () -> Unit,
@@ -637,13 +636,12 @@ private fun ClassroomSidebar(
                     }
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
-                        onClick = onStopRecording,
-                        enabled = isRecording,
+                        onClick = onToggleRecording,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Filled.Mic, contentDescription = null)
                         Spacer(Modifier.width(4.dp))
-                        Text("Stop recording")
+                        Text(if (isRecording) "Stop recording" else "Start recording")
                     }
                 }
                 1 -> {

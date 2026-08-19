@@ -49,12 +49,15 @@ object ModelDiscovery {
         for (child in children) {
             val assetPath = "$prefix/$child"
             val out = File(target, child)
-            if (assets.list(assetPath) != null) {
-                copyAssetTree(assets, assetPath, out)
-            } else {
-                out.parentFile?.mkdirs()
+            out.parentFile?.mkdirs()
+            // assets.list() is not a reliable file-vs-directory test (it returns an empty
+            // array for files on some Android versions), so probe with open(): a file can be
+            // opened, a directory cannot.
+            val isFile = runCatching {
                 assets.open(assetPath).use { it.copyTo(out.outputStream()) }
-            }
+                true
+            }.getOrDefault(false)
+            if (!isFile) copyAssetTree(assets, assetPath, out)
         }
     }
 }
