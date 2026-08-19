@@ -57,6 +57,69 @@ data class PalmRejectionSettings(
      * the heuristic because it only affects the current gesture.
      */
     var autoEraseEnabled: Boolean = false,
+
+    // --- Resting-hand / palm rejection knobs (Task 1) -------------------------------
+    /**
+     * Master switch for the entire palm/resting-hand rejection pipeline. When off, every
+     * contact is treated as writable/finger input (no size-based rejection).
+     */
+    var palmRejectionEnabled: Boolean = true,
+    /**
+     * When on, the resting-hand tracker runs: stationary fingers, the side of the hand,
+     * and multi-contact resting clusters are ignored while a moving writing pointer is
+     * still accepted. This is the behavior that lets a user write with their hand resting
+     * on the screen.
+     */
+    var restingHandModeEnabled: Boolean = true,
+    /**
+     * Smoothed contact size (mm) above which a drawing pointer is cancelled as a palm.
+     * Only reached when the growth is sustained (smoothing + hysteresis), so a single
+     * digitizer spike never kills an in-progress stroke.
+     */
+    var palmSizeThresholdMm: Float = 24f,
+    /**
+     * Contact size (mm) considered "suspicious" — large enough that combined with other
+     * resting signals it hints at a palm even when below [palmSizeThresholdMm].
+     */
+    var suspiciousSizeThresholdMm: Float = 16f,
+    /**
+     * Distance (mm) a buffered [ContactClassification.CANDIDATE] must travel before it is
+     * promoted to the writing pointer. Stroke-like motion promotes it; anything less is
+     * jitter from a resting finger.
+     */
+    var movementPromoteThresholdMm: Float = 3f,
+    /**
+     * How long a contact may remain (nearly) stationary in a resting context before it is
+     * classified [ContactClassification.RESTING] and stops drawing / driving gestures.
+     */
+    var stationaryRestTimeMs: Long = 350L,
+    /**
+     * Observation window for a buffered candidate: it is promoted on movement or demoted
+     * to [ContactClassification.RESTING] after this long without movement.
+     */
+    var candidateEvaluationWindowMs: Long = 250L,
+    /** Distance (mm) from a screen edge within which a contact is considered edge-adjacent. */
+    var edgeMarginMm: Float = 30f,
+    /** Max distance (mm) between two contacts for them to be part of the same resting cluster. */
+    var clusterDistanceThresholdMm: Float = 45f,
+    /**
+     * How long (ms) cluster members must stay still before the cluster is treated as a
+     * resting hand rather than an in-progress two-finger gesture.
+     */
+    var clusterStationaryThresholdMs: Long = 250L,
+    /**
+     * When on, the resting-hand tracker cancels a drawing pointer whose smoothed contact
+     * size grows into palm territory (e.g. the user flattens their finger mid-stroke).
+     */
+    var palmGrowthCancelEnabled: Boolean = true,
+    /** A drawing pointer is cancelled as a palm only when its smoothed size exceeds its
+     *  initial size by at least this multiple (guards against a finger flattening briefly). */
+    var palmGrowthFactor: Float = 2.2f,
+    /**
+     * When on, the canvas draws a live overlay of every contact with its classification
+     * color, size circle and pointer id so resting-hand behavior can be verified on-device.
+     */
+    var debugOverlayEnabled: Boolean = false,
 ) {
     /** Applies user calibration and sensitivity to yield the effective writing cutoff. */
     fun effectiveWritingMaxMm(): Float {

@@ -83,6 +83,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.BackHandler
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -227,8 +234,9 @@ fun EditorScreen(
 
     // The transcript sidebar is user-closable/openable: it starts open for classroom
     // notes (and whenever a recording/transcript exists) but the user can hide it to
-    // reclaim the canvas and reopen it from the top bar.
-    var showTranscriptSidebar by remember { mutableStateOf(true) }
+    // reclaim the canvas and reopen it from the top bar. rememberSaveable keeps the
+    // open/closed choice across configuration changes (rotation).
+    var showTranscriptSidebar by rememberSaveable { mutableStateOf(true) }
 
     // A classroom note is a normal note plus the on-device audio/transcript sidebar.
     // Opening one shows the sidebar from the start (with a "record" hint) so the feature
@@ -379,10 +387,41 @@ fun EditorScreen(
             )
         }
     ) { padding ->
-        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                // Escape closes the transcript sidebar just like the close button.
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                        if (showTranscriptSidebar) {
+                            showTranscriptSidebar = false
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+        ) {
             // Phones (narrow) get a slim page strip so the canvas keeps its width;
             // tablets/landscape get the full page rail.
             val compact = maxWidth < 600.dp
+
+            // Classroom Notes transcript sidebar: a sibling of the canvas so it never
+            // steals the pen's touches. Visible for classroom notes from the start
+            // (live during recording, static when reopened), otherwise whenever a
+            // recording session exists for this page.
+            val showTranscript = showTranscriptSidebar && (
+                isClassroom ||
+                    transcript.isNotEmpty() || partial.isNotEmpty() || isRecording
+                )
+
+            // Hardware/system back closes the transcript sidebar before leaving the note.
+            BackHandler(enabled = showTranscript) {
+                showTranscriptSidebar = false
+            }
 
             Row(Modifier.fillMaxSize()) {
                 // Canvas fills the whole screen so you can write edge to edge; the page
@@ -412,6 +451,7 @@ fun EditorScreen(
                                 view.selectionBoundsMm = editorState!!.selectionBoundsMm
                                 view.listener = vm.canvasListener
                                 view.autoEraseEnabled = settings.autoEraseEnabled
+                                view.debugOverlayEnabled = settings.debugOverlayEnabled
                                 // Palm rest zone + scroll bar.
                                 view.palmZone = settings.palmZone
                                 view.scrollBarVisible = true
@@ -451,10 +491,6 @@ fun EditorScreen(
                 // steals the pen's touches. Visible for classroom notes from the start
                 // (live during recording, static when reopened), otherwise whenever a
                 // recording session exists for this page.
-                val showTranscript = showTranscriptSidebar && (
-                    isClassroom ||
-                        transcript.isNotEmpty() || partial.isNotEmpty() || isRecording
-                )
                 if (showTranscript) {
                     HorizontalDivider(
                         modifier = Modifier.width(1.dp).fillMaxHeight(),
@@ -596,8 +632,17 @@ private fun ClassroomSidebar(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Filled.Close, contentDescription = "Hide transcript sidebar")
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(MaterialTheme.colorScheme.surface, CircleShape),
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Hide transcript sidebar",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
                 }
             }
             if (isRecording) {

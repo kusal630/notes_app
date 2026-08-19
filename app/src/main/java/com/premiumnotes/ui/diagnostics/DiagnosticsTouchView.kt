@@ -65,6 +65,8 @@ class DiagnosticsTouchView(
                 com.premiumnotes.input.ContactClassification.PALM -> 0xFFFF4D4D.toInt()
                 com.premiumnotes.input.ContactClassification.ERASER -> 0xFF9C27B0.toInt()
                 com.premiumnotes.input.ContactClassification.REJECTED -> 0xFF9E9E9E.toInt()
+                com.premiumnotes.input.ContactClassification.CANDIDATE -> 0xFFFFB300.toInt()
+                com.premiumnotes.input.ContactClassification.RESTING -> 0xFF90A4AE.toInt()
             }
 
             val majorPx = c.toolMajorMm * pxPerMm

@@ -23,6 +23,7 @@ class PalmRejectionEngine(
     private var classifier = PalmClassifier(currentSettings)
     private var lock = WritingLock(currentSettings.writingHoldoffMs)
     private var lastKnownHoldoffMs = currentSettings.writingHoldoffMs
+    private val restingTracker = RestingHandTracker(capabilities)
 
     /**
      * The user-reserved palm rest zone resolved to screen pixels, or null when disabled.
@@ -34,10 +35,17 @@ class PalmRejectionEngine(
         palmZoneRect = rect
     }
 
+    /** Viewport size in screen px (used by the resting-hand tracker for edge detection). */
+    fun setViewportSize(widthPx: Int, heightPx: Int) {
+        restingTracker.viewportWidthPx = widthPx.toFloat()
+        restingTracker.viewportHeightPx = heightPx.toFloat()
+    }
+
     fun reset() {
         lock.reset(System.nanoTime())
         pointerStates.clear()
         classifier.resetHistory()
+        restingTracker.reset()
     }
 
     /** Recreates derived state only when the settings instance actually changes. */
@@ -60,12 +68,18 @@ class PalmRejectionEngine(
         refreshIfSettingsChanged()
         val nowNanos = frame.eventTimeNanos
 
+        // Master switch: with palm rejection off nothing is ever rejected or buffered —
+        // every contact behaves as plain writable/finger input.
+        if (!currentSettings.palmRejectionEnabled) {
+            return processWithoutPalmRejection(frame)
+        }
+
         // Normalize every active contact once so the relative classifier can compare the
         // CURRENT frame's contact sizes against each other.
         val normalized = frame.contacts.map { normalizer.normalize(it) }
         val activeSizesMm = normalized.map { it.maxDimMm }
 
-        val classified = mutableListOf<ClassifiedContact>()
+        val baseClassified = mutableListOf<ClassifiedContact>()
         for (contact in normalized) {
             val state = pointerStates[contact.pointerId]
 
@@ -90,7 +104,7 @@ class PalmRejectionEngine(
                     speedMmPerSec = state?.speedMmPerSec ?: 0f,
                     durationMs = state?.let { (nowNanos - it.downTimeNanos) / 1_000_000L } ?: 0L,
                 )
-                classified += classifiedContact
+                baseClassified += classifiedContact
                 classifier.updateHistory(classifiedContact)
                 continue
             }
@@ -117,21 +131,104 @@ class PalmRejectionEngine(
                 speedMmPerSec = state?.speedMmPerSec ?: 0f,
                 durationMs = state?.let { (nowNanos - it.downTimeNanos) / 1_000_000L } ?: 0L,
             )
-            classified += classifiedContact
+            baseClassified += classifiedContact
             // Feed the decision back so the adaptive single-pointer fallback learns this
             // device's real contact-size scale.
             classifier.updateHistory(classifiedContact)
         }
 
-        val writingPointerId = manageWritingLock(frame, classified, nowNanos)
-        val gestureIds = selectGesturePointers(classified, writingPointerId)
+        // Resting-hand layer: adds motion/timing/cluster/edge evidence on top of the size
+        // decision. It may buffer small contacts in a resting context (CANDIDATE), mark
+        // stationary fingers RESTING, promote a moving candidate to WRITING, or cancel a
+        // drawing pointer whose smoothed contact size grew palm-like.
+        val trackerResult = restingTracker.process(
+            frame,
+            baseClassified,
+            lock.activePointerId,
+            currentSettings,
+        )
+        val classified = trackerResult.classified
+
+        // The lock may change AFTER manageWritingLock runs (a candidate promoted to the
+        // writer on a MOVE frame, or a locked pointer cancelled by palm-growth). Re-read it
+        // after applying the tracker's lock decisions so the frame reflects the real writer.
+        manageWritingLock(frame, classified, nowNanos)
+        applyTrackerLockChanges(frame, trackerResult, nowNanos)
+        val finalWritingPointerId = lock.activePointerId
+        val gestureIds = selectGesturePointers(classified, finalWritingPointerId)
 
         return ClassifiedFrame(
             frame = frame,
             contacts = classified,
-            activeWritingPointerId = writingPointerId,
+            activeWritingPointerId = finalWritingPointerId,
             gesturePointerIds = gestureIds,
         )
+    }
+
+    /**
+     * Fallback used when [PalmRejectionSettings.palmRejectionEnabled] is false: the size
+     * classifier, palm zone and resting-hand tracker are all bypassed. Hardware pens always
+     * write, erasers erase, a lone finger writes when finger writing is enabled, and any
+     * finger pair pans/zooms — no contact is ever rejected.
+     */
+    private fun processWithoutPalmRejection(frame: InputFrame): ClassifiedFrame {
+        val nowNanos = frame.eventTimeNanos
+        val classified = frame.contacts.map { contact ->
+            val normalized = normalizer.normalize(contact)
+            val classification: ContactClassification
+            val reason: ClassificationReason
+            when (normalized.toolType) {
+                ToolKind.STYLUS -> {
+                    classification = ContactClassification.WRITING
+                    reason = ClassificationReason.HARDWARE_STYLUS
+                }
+                ToolKind.ERASER -> {
+                    classification = ContactClassification.ERASER
+                    reason = ClassificationReason.HARDWARE_ERASER
+                }
+                else -> {
+                    if (currentSettings.enableFingerWriting && frame.pointerCount == 1) {
+                        classification = ContactClassification.WRITING
+                        reason = ClassificationReason.FINGER_WRITING
+                    } else {
+                        classification = ContactClassification.FINGER
+                        reason = ClassificationReason.SMALL_CONTACT
+                    }
+                }
+            }
+            ClassifiedContact(
+                contact = normalized,
+                classification = classification,
+                confidence = 0.8f,
+                reason = reason,
+                effectiveThresholdMm = 0f,
+                speedMmPerSec = 0f,
+                durationMs = normalized.ageMs(nowNanos),
+            )
+        }
+        val writingPointerId = manageWritingLock(frame, classified, nowNanos)
+        val gestureIds = selectGesturePointers(classified, writingPointerId)
+        return ClassifiedFrame(frame, classified, writingPointerId, gestureIds)
+    }
+
+    /**
+     * Applies the resting-hand tracker's writing-lock decisions that happen outside the
+     * DOWN/POINTER_DOWN claim path: promoting a buffered candidate to the lock on a MOVE
+     * frame, and cancelling a locked pointer whose smoothed size grew palm-like.
+     */
+    private fun applyTrackerLockChanges(
+        frame: InputFrame,
+        result: RestingHandTracker.Result,
+        nowNanos: Long,
+    ) {
+        val cancelId = result.cancelLockPointerId
+        if (cancelId != null && lock.activePointerId == cancelId) {
+            lock.reset(nowNanos)
+        }
+        val promoteId = result.promoteCandidatePointerId
+        if (promoteId != null && !lock.isActive && frame.action == InputAction.MOVE) {
+            lock.tryClaim(promoteId, nowNanos, respectHoldoff = false)
+        }
     }
 
     private fun manageWritingLock(
@@ -146,6 +243,8 @@ class PalmRejectionEngine(
             if (s == null) {
                 pointerStates[cid] = PointerMotionState(
                     downTimeNanos = c.contact.downTimeNanos,
+                    startX = c.contact.x,
+                    startY = c.contact.y,
                     lastX = c.contact.x,
                     lastY = c.contact.y,
                     lastTimeNanos = c.contact.eventTimeNanos,

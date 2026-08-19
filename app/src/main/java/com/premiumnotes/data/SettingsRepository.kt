@@ -56,6 +56,19 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val PALM_ZONE_CY_KEY = floatPreferencesKey("palm_zone_cy")
         private val PALM_ZONE_W_KEY = floatPreferencesKey("palm_zone_w")
         private val PALM_ZONE_H_KEY = floatPreferencesKey("palm_zone_h")
+        private val PALM_REJECTION_ENABLED_KEY = booleanPreferencesKey("palm_rejection_enabled")
+        private val RESTING_HAND_ENABLED_KEY = booleanPreferencesKey("resting_hand_enabled")
+        private val PALM_SIZE_THRESHOLD_KEY = floatPreferencesKey("palm_size_threshold_mm")
+        private val SUSPICIOUS_SIZE_THRESHOLD_KEY = floatPreferencesKey("suspicious_size_threshold_mm")
+        private val MOVEMENT_PROMOTE_KEY = floatPreferencesKey("movement_promote_mm")
+        private val STATIONARY_REST_MS_KEY = longPreferencesKey("stationary_rest_ms")
+        private val CANDIDATE_WINDOW_MS_KEY = longPreferencesKey("candidate_window_ms")
+        private val EDGE_MARGIN_KEY = floatPreferencesKey("edge_margin_mm")
+        private val CLUSTER_DIST_KEY = floatPreferencesKey("cluster_dist_mm")
+        private val CLUSTER_STATIONARY_MS_KEY = longPreferencesKey("cluster_stationary_ms")
+        private val PALM_GROWTH_CANCEL_KEY = booleanPreferencesKey("palm_growth_cancel")
+        private val PALM_GROWTH_FACTOR_KEY = floatPreferencesKey("palm_growth_factor")
+        private val DEBUG_OVERLAY_KEY = booleanPreferencesKey("debug_overlay")
     }
 
     val settingsFlow: Flow<PalmRejectionSettings> = dataStore.data
@@ -87,6 +100,19 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             prefs[PALM_ZONE_CY_KEY] = current.palmZone.centerYFrac
             prefs[PALM_ZONE_W_KEY] = current.palmZone.widthMm
             prefs[PALM_ZONE_H_KEY] = current.palmZone.heightMm
+            prefs[PALM_REJECTION_ENABLED_KEY] = current.palmRejectionEnabled
+            prefs[RESTING_HAND_ENABLED_KEY] = current.restingHandModeEnabled
+            prefs[PALM_SIZE_THRESHOLD_KEY] = current.palmSizeThresholdMm
+            prefs[SUSPICIOUS_SIZE_THRESHOLD_KEY] = current.suspiciousSizeThresholdMm
+            prefs[MOVEMENT_PROMOTE_KEY] = current.movementPromoteThresholdMm
+            prefs[STATIONARY_REST_MS_KEY] = current.stationaryRestTimeMs
+            prefs[CANDIDATE_WINDOW_MS_KEY] = current.candidateEvaluationWindowMs
+            prefs[EDGE_MARGIN_KEY] = current.edgeMarginMm
+            prefs[CLUSTER_DIST_KEY] = current.clusterDistanceThresholdMm
+            prefs[CLUSTER_STATIONARY_MS_KEY] = current.clusterStationaryThresholdMs
+            prefs[PALM_GROWTH_CANCEL_KEY] = current.palmGrowthCancelEnabled
+            prefs[PALM_GROWTH_FACTOR_KEY] = current.palmGrowthFactor
+            prefs[DEBUG_OVERLAY_KEY] = current.debugOverlayEnabled
         }
     }
 
@@ -124,5 +150,18 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
                 widthMm = prefs[PALM_ZONE_W_KEY] ?: 72f,
                 heightMm = prefs[PALM_ZONE_H_KEY] ?: 60f,
             ),
+            palmRejectionEnabled = prefs[PALM_REJECTION_ENABLED_KEY] ?: true,
+            restingHandModeEnabled = prefs[RESTING_HAND_ENABLED_KEY] ?: true,
+            palmSizeThresholdMm = prefs[PALM_SIZE_THRESHOLD_KEY] ?: 24f,
+            suspiciousSizeThresholdMm = prefs[SUSPICIOUS_SIZE_THRESHOLD_KEY] ?: 16f,
+            movementPromoteThresholdMm = prefs[MOVEMENT_PROMOTE_KEY] ?: 3f,
+            stationaryRestTimeMs = prefs[STATIONARY_REST_MS_KEY] ?: 350L,
+            candidateEvaluationWindowMs = prefs[CANDIDATE_WINDOW_MS_KEY] ?: 250L,
+            edgeMarginMm = prefs[EDGE_MARGIN_KEY] ?: 30f,
+            clusterDistanceThresholdMm = prefs[CLUSTER_DIST_KEY] ?: 45f,
+            clusterStationaryThresholdMs = prefs[CLUSTER_STATIONARY_MS_KEY] ?: 250L,
+            palmGrowthCancelEnabled = prefs[PALM_GROWTH_CANCEL_KEY] ?: true,
+            palmGrowthFactor = prefs[PALM_GROWTH_FACTOR_KEY] ?: 2.2f,
+            debugOverlayEnabled = prefs[DEBUG_OVERLAY_KEY] ?: false,
         )
 }

@@ -36,6 +36,21 @@ enum class ContactClassification {
 
     /** Contact filtered out entirely by the active mode. */
     REJECTED,
+
+    /**
+     * A small contact currently being observed by the resting-hand tracker. It landed in
+     * a resting-hand context (resting fingers already down, or several contacts at once)
+     * so it is not drawn yet: it is promoted to [WRITING] once it moves like a stroke, or
+     * demoted to [RESTING] if it stays still for the evaluation window.
+     */
+    CANDIDATE,
+
+    /**
+     * A stationary small contact that is part of a resting hand (a resting finger, the
+     * side of a hand near the screen edge, or a member of a stationary cluster). It never
+     * draws and never drives gestures.
+     */
+    RESTING,
 }
 
 /** Hardware tool type as reported by the OS (mapped from MotionEvent). */
@@ -123,6 +138,18 @@ enum class ClassificationReason {
     MODE_STRICT_REJECT,
     /** Contact fell inside the user-reserved palm rest zone. */
     IN_PALM_ZONE,
+    /** Resting-hand tracker: contact stayed still in a resting context. */
+    RESTING_STATIONARY,
+    /** Resting-hand tracker: contact is part of a stationary resting cluster. */
+    RESTING_CLUSTER,
+    /** Resting-hand tracker: contact rests near a screen edge. */
+    RESTING_EDGE,
+    /** Resting-hand tracker: contact is held for observation before drawing. */
+    CANDIDATE_BUFFER,
+    /** Resting-hand tracker: a buffered contact moved like a stroke and became the writer. */
+    PROMOTED_TO_WRITING,
+    /** Resting-hand tracker: a drawing pointer's smoothed contact grew palm-sized. */
+    PALM_GROWTH_CANCELLED,
 }
 
 data class ClassificationResult(
@@ -140,16 +167,44 @@ data class ClassifiedContact(
     val effectiveThresholdMm: Float,
     val speedMmPerSec: Float,
     val durationMs: Long,
+    /** Screen position where this pointer first went down (for seeding a promoted stroke). */
+    val downX: Float? = null,
+    val downY: Float? = null,
 )
 
-/** Per-pointer dynamic state the engine tracks between frames. */
+/**
+ * Per-pointer dynamic state the engine tracks between frames.
+ *
+ * The resting-hand tracker extends this with motion and contact-size history so it can
+ * distinguish a stationary resting finger from the moving writing finger using nothing
+ * more than motion, timing, cluster membership and edge proximity — no absolute size
+ * assumptions that vary across digitizers.
+ */
 internal data class PointerMotionState(
     val downTimeNanos: Long,
+    val startX: Float,
+    val startY: Float,
     var lastX: Float,
     var lastY: Float,
     var lastTimeNanos: Long,
     var speedMmPerSec: Float = 0f,
     var rawSampleCount: Int = 0,
+    /** Total distance travelled since this pointer went down, in screen pixels. */
+    var totalDistPx: Float = 0f,
+    /** Distance travelled between the two most recent samples (screen px). */
+    var lastFrameDistPx: Float = 0f,
+    /** Time of the last sample that moved more than the jitter dead-zone (nanos). */
+    var lastMoveTimeNanos: Long = downTimeNanos,
+    /** Contact size (maxDimMm) reported when this pointer first went down. */
+    var initialContactSizeMm: Float = 0f,
+    /** Exponential-moving-average of the contact size (mm); resists single-frame spikes. */
+    var smoothedContactSizeMm: Float = 0f,
+    /** Most recent raw contact size (mm). */
+    var lastContactSizeMm: Float = 0f,
+    /** Resting-hand classification from the previous frame (keeps CANDIDATE/RESTING sticky). */
+    var restingClassification: ContactClassification = ContactClassification.WRITING,
+    /** True on the first frame a pointer is seen (used by the candidate-buffering rule). */
+    var isNew: Boolean = true,
 )
 
 /**

@@ -159,6 +159,19 @@ fun SettingsScreen(
                         this.enableFingerWriting = newSettings.enableFingerWriting
                         this.autoConvertHandwritingToText = newSettings.autoConvertHandwritingToText
                         this.palmZone = newSettings.palmZone
+                        this.palmRejectionEnabled = newSettings.palmRejectionEnabled
+                        this.restingHandModeEnabled = newSettings.restingHandModeEnabled
+                        this.palmSizeThresholdMm = newSettings.palmSizeThresholdMm
+                        this.suspiciousSizeThresholdMm = newSettings.suspiciousSizeThresholdMm
+                        this.movementPromoteThresholdMm = newSettings.movementPromoteThresholdMm
+                        this.stationaryRestTimeMs = newSettings.stationaryRestTimeMs
+                        this.candidateEvaluationWindowMs = newSettings.candidateEvaluationWindowMs
+                        this.edgeMarginMm = newSettings.edgeMarginMm
+                        this.clusterDistanceThresholdMm = newSettings.clusterDistanceThresholdMm
+                        this.clusterStationaryThresholdMs = newSettings.clusterStationaryThresholdMs
+                        this.palmGrowthCancelEnabled = newSettings.palmGrowthCancelEnabled
+                        this.palmGrowthFactor = newSettings.palmGrowthFactor
+                        this.debugOverlayEnabled = newSettings.debugOverlayEnabled
                     }
                 }
             })
@@ -252,6 +265,86 @@ fun SettingsContent(
             steps = 10,
             modifier = Modifier.fillMaxWidth()
         )
+
+        Spacer(Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Palm rejection", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Master switch for the whole palm/resting-hand rejection pipeline. " +
+                        "When off, every contact behaves as plain writable/finger input.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = settings.palmRejectionEnabled,
+                onCheckedChange = { onSettingChange(settings.copy(palmRejectionEnabled = it)) },
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Resting-hand mode", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Ignore stationary fingers, the side of the hand and multi-contact " +
+                        "resting clusters while a moving writing pointer is still accepted — " +
+                        "so you can write with your hand resting on the screen.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = settings.restingHandModeEnabled,
+                onCheckedChange = { onSettingChange(settings.copy(restingHandModeEnabled = it)) },
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            "Palm size threshold: ${"%.0f".format(settings.palmSizeThresholdMm)} mm",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        androidx.compose.material3.Slider(
+            value = settings.palmSizeThresholdMm,
+            onValueChange = { v -> onSettingChange(settings.copy(palmSizeThresholdMm = v)) },
+            valueRange = 12f..40f,
+            steps = 13,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "A drawing pointer whose smoothed contact size grows above this is cancelled " +
+                "as a palm (only on sustained growth — a single digitizer spike is ignored).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Classification debug overlay", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Draw a live overlay on the canvas showing every contact with its " +
+                        "classification, so resting-hand behavior can be verified on-device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = settings.debugOverlayEnabled,
+                onCheckedChange = { onSettingChange(settings.copy(debugOverlayEnabled = it)) },
+            )
+        }
 
         SettingsSectionDivider()
         SettingsSectionTitle("Calibration")

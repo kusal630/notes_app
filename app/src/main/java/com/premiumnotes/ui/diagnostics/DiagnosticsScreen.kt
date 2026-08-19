@@ -293,6 +293,8 @@ private fun ContactRow(cc: com.premiumnotes.input.ClassifiedContact, settings: P
         ContactClassification.PALM -> Color(0xFFFF4D4D)
         ContactClassification.ERASER -> Color(0xFF9C27B0)
         ContactClassification.REJECTED -> Color(0xFF9E9E9E)
+        ContactClassification.CANDIDATE -> Color(0xFFFFB300)
+        ContactClassification.RESTING -> Color(0xFF90A4AE)
     }
     Column(
         Modifier

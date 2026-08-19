@@ -121,6 +121,9 @@ class InkCanvasView @JvmOverloads constructor(
      */
     var autoEraseEnabled: Boolean = false
 
+    /** When on, the canvas draws a live per-contact classification overlay (settings toggle). */
+    var debugOverlayEnabled: Boolean = false
+
     private val writeEraseDetector = com.premiumnotes.input.WriteEraseDetector()
 
     /** While true, the current gesture is being treated as erase even though the user
@@ -212,6 +215,17 @@ class InkCanvasView @JvmOverloads constructor(
         isAntiAlias = true
     }
 
+    // --- classification debug overlay ---
+    private val debugFillPaint = Paint().apply {
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val debugLabelPaint = Paint().apply {
+        isAntiAlias = true
+        textSize = 14f
+        color = 0xFF000000.toInt()
+    }
+
     // --- active stroke ---
     private var strokeBuilder: StrokeBuilder? = null
 
@@ -252,6 +266,9 @@ class InkCanvasView @JvmOverloads constructor(
 
     private var gesture: GestureStart? = null
 
+    /** Most recent classified frame, kept for the debug overlay (drawn only when enabled). */
+    private var lastClassified: ClassifiedFrame? = null
+
     private val scale: Float get() = capabilities.pxPerMm * zoom
 
     init {
@@ -274,6 +291,7 @@ class InkCanvasView @JvmOverloads constructor(
         syncPalmZoneRect()
 
         val classified = engine.process(input)
+        lastClassified = classified
 
         // A new gesture always starts clean: clear any erase-override from a previous
         // gesture and reset the write/erase detector.
@@ -324,6 +342,7 @@ class InkCanvasView @JvmOverloads constructor(
         if (!::capabilities.isInitialized || !::engine.isInitialized) return
         lastZoneRect = computePalmZoneRect()
         engine.setPalmZoneRect(lastZoneRect)
+        engine.setViewportSize(width, height)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -591,7 +610,36 @@ class InkCanvasView @JvmOverloads constructor(
                     }
 
                     com.premiumnotes.input.InputAction.MOVE -> {
-                        val builder = strokeBuilder ?: return
+                        var builder = strokeBuilder
+                        if (builder == null) {
+                            // The writing lock was just established on this MOVE frame by the
+                            // resting-hand tracker (a buffered CANDIDATE promoted to the
+                            // writer). The stroke never saw a DOWN event, so seed it here from
+                            // the pointer's recorded down position; otherwise the stroke would
+                            // begin at the current point and lose the leading tail of the
+                            // stroke it already traveled.
+                            val startX = screenToWorldX(contact.contact.x)
+                            val startY = screenToWorldY(contact.contact.y)
+                            val downX = contact.downX
+                            val downY = contact.downY
+                            if (autoEraseEnabled) {
+                                writeEraseDetector.reset(
+                                    hitTestInk(
+                                        if (downX != null && downY != null) screenToWorldX(downX) else startX,
+                                        if (downX != null && downY != null) screenToWorldY(downY) else startY,
+                                    )
+                                )
+                            }
+                            val b = StrokeBuilder(style = penStyle, id = nextStrokeId())
+                            if (downX != null && downY != null) {
+                                b.onDown(screenToWorldX(downX), screenToWorldY(downY))
+                            } else {
+                                b.onDown(startX, startY)
+                            }
+                            strokeBuilder = b
+                            writingPointerId = writingId
+                            builder = b
+                        }
                         // Auto-scroll (page scrolling): keep the pen away from the top and
                         // bottom viewport edges so writing flows like a real notebook instead
                         // of forcing the user to create a new page. The world point for THIS
@@ -1291,6 +1339,46 @@ class InkCanvasView @JvmOverloads constructor(
             canvas.drawRoundRect(
                 barLeft + 2f, thumbY, w - 2f, thumbY + thumbH, 6f, 6f,
                 Paint().apply { color = 0x662E5BFF.toInt() },
+            )
+        }
+
+        if (debugOverlayEnabled) {
+            drawDebugOverlay(canvas)
+        }
+    }
+
+    /**
+     * Live classification overlay: one filled circle per active contact colored by its
+     * current classification plus a label with the pointer id, classification and
+     * confidence. Drawn in screen space on top of everything so resting-hand behavior can
+     * be verified on-device (WRITING blue, STYLUS blue, CANDIDATE amber, RESTING gray,
+     * PALM red, FINGER green, ERASER purple, REJECTED gray).
+     */
+    private fun drawDebugOverlay(canvas: Canvas) {
+        val frame = lastClassified ?: return
+        for (cc in frame.contacts) {
+            val c = cc.contact
+            val color = when (cc.classification) {
+                com.premiumnotes.input.ContactClassification.WRITING -> 0xFF2E5BFF.toInt()
+                com.premiumnotes.input.ContactClassification.FINGER -> 0xFF00A86B.toInt()
+                com.premiumnotes.input.ContactClassification.PALM -> 0xFFFF4D4D.toInt()
+                com.premiumnotes.input.ContactClassification.ERASER -> 0xFF9C27B0.toInt()
+                com.premiumnotes.input.ContactClassification.REJECTED -> 0xFF9E9E9E.toInt()
+                com.premiumnotes.input.ContactClassification.CANDIDATE -> 0xFFFFB300.toInt()
+                com.premiumnotes.input.ContactClassification.RESTING -> 0xFF90A4AE.toInt()
+            }
+            val r = (c.toolMajorMm * capabilities.pxPerMm / 2f).coerceAtLeast(24f)
+            debugFillPaint.color = color
+            debugFillPaint.alpha = 70
+            canvas.drawCircle(c.x, c.y, r, debugFillPaint)
+            debugFillPaint.alpha = 255
+            canvas.drawCircle(c.x, c.y, r, debugFillPaint)
+            debugLabelPaint.color = color
+            canvas.drawText(
+                "P${c.pointerId} ${cc.classification.name} ${(cc.confidence * 100).toInt()}%",
+                c.x + r + 4f,
+                c.y + 4f,
+                debugLabelPaint,
             )
         }
     }

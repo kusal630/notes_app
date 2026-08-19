@@ -126,3 +126,42 @@ avoids flickering between pen/palm during a stroke.
 The classifier is tested with synthetic streams simulating a small pen contact, a large
 palm contact, pen+palm simultaneous contacts, and finger gestures. See
 `docs/testing-plan.md` for the matrix.
+
+## Resting-Hand Layer (`RestingHandTracker`)
+
+The size classifier cannot resolve the case that matters most when actually writing on a
+tablet: a resting hand frequently appears as **several small finger-sized contacts**
+(resting fingers, or the side of a hand near an edge) that are indistinguishable from a
+writing fingertip by size alone. The only reliable signal is **motion** — the real writer
+moves like a stroke while the resting fingers stay put.
+
+`RestingHandTracker` runs *after* the size classifier and adds motion / timing / cluster /
+edge evidence on top of the size decision. It is stateless w.r.t. the classifier: disabling
+`restingHandModeEnabled` restores the exact legacy behavior.
+
+Rules (see `RestingHandTracker.kt` for the implementation):
+
+- **Ambiguity-gated buffering** — a new small contact is held as `CANDIDATE` (never drawn,
+  never a gesture) only when there is genuine ambiguity: an already-established `RESTING`
+  finger is present, or the frame has ≥ 3 contacts with ≥ 2 non-palm, non-tool "ambiguous"
+  small contacts. A pen next to a pair of large palms is *not* ambiguous (the palms are
+  already confidently rejected), so it claims the lock immediately.
+- **Promotion** — a buffered `CANDIDATE` is promoted to `WRITING` and claims the writing
+  lock the moment it is the *only* mover (`movingIds.size == 1`) and has travelled ≥
+  `movementPromoteThresholdMm`. Two movers together stay `FINGER`, so two-finger pan/zoom
+  keeps working with a resting palm on the screen.
+- **Resting fingers** — a stationary small contact in a resting context (≥ 3 contacts,
+  near a screen edge, a stationary cluster, or a palm present) becomes `RESTING` after
+  `stationaryRestTimeMs` and neither draws nor drives gestures. It can be re-promoted to
+  `WRITING` if it becomes the unique mover (the user starts writing with a finger that was
+  already resting).
+- **Sticky locked writer** — a locked writing pointer is never demoted for pausing; it is
+  only cancelled when its *smoothed* contact size grows into palm territory
+  (`smoothed ≥ palmSizeThresholdMm × 1.15` **and** `≥ initialSize × palmGrowthFactor`),
+  so a single digitizer spike never kills an in-progress stroke.
+
+### Master switch
+
+`palmRejectionEnabled = false` bypasses the entire pipeline: every contact is treated as
+plain writable/finger input (hardware pens write, erasers erase, a lone finger writes when
+finger writing is enabled, finger pairs pan/zoom) and nothing is ever rejected or buffered.
