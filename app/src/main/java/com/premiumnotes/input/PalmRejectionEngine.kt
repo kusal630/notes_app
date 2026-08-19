@@ -69,12 +69,17 @@ class PalmRejectionEngine(
         for (contact in normalized) {
             val state = pointerStates[contact.pointerId]
 
-            // The user-reserved palm rest zone is authoritative: any contact whose center
-            // falls inside it is the resting palm. It can never be the writer and can never
-            // drive a gesture, regardless of size/tool-type signals (the zone is explicitly
-            // set aside for the palm). An already-locked writing pointer is exempt so an
-            // in-progress stroke crossing the zone is not cut mid-stroke.
-            val inZone = palmZoneRect?.contains(contact.x, contact.y) == true
+            // The user-reserved palm rest zone is authoritative for FINGER contacts: any
+            // finger contact whose center falls inside it is the resting palm. It can never
+            // be the writer and can never drive a gesture. Hardware tools (stylus/eraser)
+            // are deliberately exempt — the zone is set aside for the palm, and a pen that
+            // wanders into it must keep writing, otherwise strokes are lost. An already
+            // locked writing pointer is exempt so an in-progress stroke crossing the zone
+            // is not cut mid-stroke.
+            val isFingerContact = contact.toolType == ToolKind.FINGER ||
+                contact.toolType == ToolKind.UNKNOWN
+            val inZone = palmZoneRect?.contains(contact.x, contact.y) == true &&
+                isFingerContact
             if (inZone && lock.activePointerId != contact.pointerId) {
                 val classifiedContact = ClassifiedContact(
                     contact = contact,

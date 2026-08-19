@@ -115,8 +115,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             autoConvertHandwritingToText = prefs[AUTO_CONVERT_HANDWRITING_KEY] ?: false,
             autoEraseEnabled = prefs[AUTO_ERASE_KEY] ?: false,
             palmZone = PalmZone(
-                mode = PalmZoneMode.entries.getOrNull(prefs[PALM_ZONE_MODE_KEY] ?: PalmZoneMode.OFF.ordinal)
-                    ?: PalmZoneMode.OFF,
+                mode = PalmZoneMode.entries.getOrNull(prefs[PALM_ZONE_MODE_KEY] ?: PalmZoneMode.AUTO.ordinal)
+                    ?: PalmZoneMode.AUTO,
                 side = PalmZoneSide.entries.getOrNull(prefs[PALM_ZONE_SIDE_KEY] ?: PalmZoneSide.LEFT.ordinal)
                     ?: PalmZoneSide.LEFT,
                 centerXFrac = prefs[PALM_ZONE_CX_KEY] ?: 0.18f,

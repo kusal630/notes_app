@@ -8,10 +8,10 @@ import org.junit.Test
 class PalmZoneTest {
 
     @Test
-    fun disabledByDefault() {
+    fun enabledByDefaultInAutoMode() {
         val zone = PalmZone()
-        assertFalse(zone.enabled)
-        assertEquals(PalmZoneMode.OFF, zone.mode)
+        assertTrue(zone.enabled)
+        assertEquals(PalmZoneMode.AUTO, zone.mode)
     }
 
     @Test

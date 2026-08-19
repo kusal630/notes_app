@@ -17,6 +17,7 @@ import com.premiumnotes.input.MotionEventParser
 import com.premiumnotes.input.PalmRejectionEngine
 import com.premiumnotes.input.PalmZone
 import com.premiumnotes.input.PalmZoneRect
+import com.premiumnotes.input.ToolKind
 import com.premiumnotes.model.PageBackground
 import com.premiumnotes.model.PenStyle
 import com.premiumnotes.model.Point
@@ -131,10 +132,10 @@ class InkCanvasView @JvmOverloads constructor(
         set(value) {
             if (field != value) {
                 field = value
-                if (!value.enabled) {
-                    zoneDragging = false
-                    engine.setPalmZoneRect(null)
-                }
+                if (!value.enabled) zoneDragging = false
+                // Re-sync the engine immediately so the zone takes effect even before
+                // the first touch event arrives.
+                syncPalmZoneRect()
                 invalidate()
             }
         }
@@ -273,8 +274,7 @@ class InkCanvasView @JvmOverloads constructor(
         if (handleZoneGripTouch(input)) return true
 
         // Keep the engine's zone in sync with this frame before it classifies anything.
-        lastZoneRect = computePalmZoneRect()
-        engine.setPalmZoneRect(lastZoneRect)
+        syncPalmZoneRect()
 
         val classified = engine.process(input)
 
@@ -313,6 +313,23 @@ class InkCanvasView @JvmOverloads constructor(
     }
 
     // --- palm rest zone + scroll bar: geometry and direct manipulation ---
+
+    /**
+     * Recomputes the palm-zone rect and pushes it to the engine. Must be kept in sync
+     * whenever the view is laid out, the zone settings change, or a frame is processed —
+     * otherwise the reserved palm space is neither drawn nor active until a touch lands.
+     */
+    private fun syncPalmZoneRect() {
+        if (!::capabilities.isInitialized || !::engine.isInitialized) return
+        lastZoneRect = computePalmZoneRect()
+        engine.setPalmZoneRect(lastZoneRect)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        syncPalmZoneRect()
+        invalidate()
+    }
 
     /**
      * Resolves the configured palm zone to screen pixels for the current frame.
@@ -370,9 +387,6 @@ class InkCanvasView @JvmOverloads constructor(
     }
 
     private fun handleZoneGripTouch(input: InputFrame): Boolean {
-        if (!palmZone.enabled || zoneDragging) {
-            // Still need to end a drag started earlier.
-        }
         when (input.action) {
             com.premiumnotes.input.InputAction.DOWN,
             com.premiumnotes.input.InputAction.POINTER_DOWN,
@@ -382,7 +396,11 @@ class InkCanvasView @JvmOverloads constructor(
                     val added = input.addedPointerId?.let { id ->
                         input.contacts.firstOrNull { it.pointerId == id }
                     }
+                    // The grip is grabbed with a finger, never with the pen — a pen DOWN
+                    // near the grip must start a stroke, not move the zone.
+                    val addedKind = added?.let { InputCapabilities.toolKindFromRaw(it.toolTypeRaw) }
                     if (grip != null && added != null &&
+                        (addedKind == ToolKind.FINGER || addedKind == ToolKind.UNKNOWN) &&
                         hypot(added.x - grip.x, added.y - grip.y) <= 36f
                     ) {
                         zoneDragging = true
@@ -1238,7 +1256,10 @@ class InkCanvasView @JvmOverloads constructor(
         }
 
         // Palm rest zone: a translucent reserved region so the user can see exactly where
-        // to rest their hand. The grip handle at the top-center can be dragged to move it.
+        // to rest their hand. Re-synced on draw so the box always matches the rect that is
+        // actually active (it follows the pen in AUTO mode). The grip handle at the
+        // top-center can be dragged to move it.
+        syncPalmZoneRect()
         lastZoneRect?.let { zone ->
             val zonePaint = Paint().apply {
                 style = Paint.Style.FILL

@@ -38,7 +38,11 @@ enum class PalmZoneSide {
  * physical millimeters so the reserved area matches a real palm at any density.
  */
 data class PalmZone(
-    val mode: PalmZoneMode = PalmZoneMode.OFF,
+    /**
+     * Defaults to AUTO so a dedicated palm space is present out of the box: the zone
+     * anchors to a bottom corner when idle and follows the writing pointer while drawing.
+     */
+    val mode: PalmZoneMode = PalmZoneMode.AUTO,
     val side: PalmZoneSide = PalmZoneSide.LEFT,
     /** Manual position, center of the zone as a fraction of screen width (0..1). */
     val centerXFrac: Float = 0.18f,

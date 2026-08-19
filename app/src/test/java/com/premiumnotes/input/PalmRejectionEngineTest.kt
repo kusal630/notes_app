@@ -528,16 +528,26 @@ class PalmRejectionEngineTest {
     }
 
     @Test
-    fun contactInsidePalmZoneIsAlwaysPalmEvenIfPenSized() {
+    fun stylusInsidePalmZoneIsStillWriting() {
         val e = zonedEngine()
-        // A pen-sized contact whose center lands inside the reserved zone: the zone is
-        // authoritative, so even a clearly-small contact is the resting palm there.
-        val penSizedInZone = TestTouchFactory.pen(pointerId = 0, x = 400f, y = 400f, timeMs = 0L)
-        val out = e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(penSizedInZone), added = 0))
-        assertEquals(ContactClassification.PALM, out.contactFor(0)?.classification)
-        assertEquals(ClassificationReason.IN_PALM_ZONE, out.contactFor(0)?.reason)
-        assertNull(out.activeWritingPointerId)
-        assertTrue(out.gesturePointerIds.isEmpty())
+        // A stylus (pen) inside the zone should be EXEMPT from the zone override
+        // and be classified as WRITING, allowing the stroke to be captured.
+        val stylusInZone = TestTouchFactory.pen(pointerId = 0, x = 400f, y = 400f, timeMs = 0L, toolType = TestTouchFactory.TOOL_STYLUS)
+        val out = e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(stylusInZone), added = 0))
+        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+        assertEquals(ClassificationReason.HARDWARE_STYLUS, out.contactFor(0)?.reason)
+        assertEquals(0, out.activeWritingPointerId)
+    }
+
+    @Test
+    fun eraserInsidePalmZoneIsStillEraser() {
+        val e = zonedEngine()
+        // An eraser (hardware tool) inside the zone should retain its ERASER classification,
+        // not be turned into a PALM by the zone override.
+        val eraserInZone = TestTouchFactory.pen(pointerId = 0, x = 400f, y = 400f, timeMs = 0L, toolType = TestTouchFactory.TOOL_ERASER)
+        val out = e.process(TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(eraserInZone), added = 0))
+        assertEquals(ContactClassification.ERASER, out.contactFor(0)?.classification)
+        assertEquals(ClassificationReason.HARDWARE_ERASER, out.contactFor(0)?.reason)
     }
 
     @Test
