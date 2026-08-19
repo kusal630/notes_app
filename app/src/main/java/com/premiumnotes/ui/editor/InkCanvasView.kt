@@ -146,9 +146,6 @@ class InkCanvasView @JvmOverloads constructor(
     private var zoneDragging = false
     private var zoneDragPointerId = -1
     private var lastZoneRect: PalmZoneRect? = null
-    /** Screen position of the active writing pointer (for AUTO zone tracking). */
-    private var lastWritingScreenX = -1f
-    private var lastWritingScreenY = -1f
 
     // --- scroll bar (visible page scroller on the right edge) ---
     var scrollBarVisible: Boolean = true
@@ -300,6 +297,10 @@ class InkCanvasView @JvmOverloads constructor(
             tool == Tool.ERASER -> handleEraser(input, classified)
             tool == Tool.PEN || tool == Tool.HIGHLIGHTER -> handleStroke(input, classified)
             tool == Tool.SELECT -> handleSelection(input, classified)
+            // A just-drawn shape is auto-selected; touching its handles or inside its
+            // bounds moves/resizes it even while the SHAPES tool is still selected, so the
+            // user can adjust the shape right after drawing it.
+            tool == Tool.SHAPES && selectionTouchTarget(input, classified) -> handleSelection(input, classified)
             tool == Tool.SHAPES -> handleShapes(input, classified)
             else -> handleNavigation(input, classified)
         }
@@ -333,50 +334,24 @@ class InkCanvasView @JvmOverloads constructor(
 
     /**
      * Resolves the configured palm zone to screen pixels for the current frame.
-     * - AUTO: follows the active writing pointer (palm side chosen by handedness) and
-     *   anchors to a bottom corner when idle.
-     * - MANUAL: fixed fractional position.
+     * - AUTO: purely automatic contact-size palm rejection — no reserved box is shown and
+     *   no position-based rejection applies. A contact larger than a finger is the palm
+     *   and does nothing; a writing pointer is never blocked by a phantom area. This is
+     *   the simple, reliable behavior the user expects (a resting palm must never stop
+     *   the pen from writing).
+     * - MANUAL: fixed fractional position, drawn as a draggable box the user reserved.
      * Returns null when the zone is disabled.
      */
     private fun computePalmZoneRect(): PalmZoneRect? {
         if (!palmZone.enabled) return null
+        if (palmZone.mode == com.premiumnotes.input.PalmZoneMode.AUTO) return null
+        if (palmZone.mode != com.premiumnotes.input.PalmZoneMode.MANUAL) return null
         val w = width.toFloat()
         val h = height.toFloat()
         val zW = palmZone.widthMm * capabilities.pxPerMm
         val zH = palmZone.heightMm * capabilities.pxPerMm
-        val gap = 6f * capabilities.pxPerMm
-
-        val cx: Float
-        val cy: Float
-        when (palmZone.mode) {
-            com.premiumnotes.input.PalmZoneMode.AUTO -> {
-                if (lastWritingScreenX >= 0f && lastWritingScreenY >= 0f) {
-                    // Place the palm beside and below where the user is currently writing.
-                    val desiredX = if (palmZone.side == com.premiumnotes.input.PalmZoneSide.LEFT) {
-                        lastWritingScreenX - zW / 2f - gap
-                    } else {
-                        lastWritingScreenX + zW / 2f + gap
-                    }
-                    val desiredY = lastWritingScreenY + zH / 2f + gap
-                    cx = desiredX.coerceIn(zW / 2f, w - zW / 2f)
-                    cy = desiredY.coerceIn(zH / 2f, h - zH / 2f)
-                } else {
-                    // Idle: anchor to the bottom corner on the palm side.
-                    val mx = 8f * capabilities.pxPerMm
-                    cx = if (palmZone.side == com.premiumnotes.input.PalmZoneSide.LEFT) {
-                        zW / 2f + mx
-                    } else {
-                        w - zW / 2f - mx
-                    }
-                    cy = h - zH / 2f - mx
-                }
-            }
-            com.premiumnotes.input.PalmZoneMode.MANUAL -> {
-                cx = palmZone.centerXFrac * w
-                cy = palmZone.centerYFrac * h
-            }
-            else -> return null
-        }
+        val cx = palmZone.centerXFrac * w
+        val cy = palmZone.centerYFrac * h
         return PalmZoneRect(cx - zW / 2f, cy - zH / 2f, cx + zW / 2f, cy + zH / 2f)
     }
 
@@ -542,8 +517,6 @@ class InkCanvasView @JvmOverloads constructor(
             com.premiumnotes.input.InputAction.POINTER_UP,
             -> {
                 if (input.liftedPointerId == writingPointerId) {
-                    lastWritingScreenX = -1f
-                    lastWritingScreenY = -1f
                     val builder = strokeBuilder
                     strokeBuilder = null
                     writingPointerId = -1
@@ -596,8 +569,6 @@ class InkCanvasView @JvmOverloads constructor(
                 }
                 val writingId = classified.activeWritingPointerId ?: return
                 val contact = classified.contactFor(writingId) ?: return
-                lastWritingScreenX = contact.contact.x
-                lastWritingScreenY = contact.contact.y
                 when (input.action) {
                     com.premiumnotes.input.InputAction.DOWN,
                     com.premiumnotes.input.InputAction.POINTER_DOWN,
@@ -775,6 +746,18 @@ class InkCanvasView @JvmOverloads constructor(
             }?.contact?.pointerId
             ?: return null
         return classified.contactFor(id)
+    }
+
+    /** True when a selection is active and [input]'s touch targets it: a resize handle or
+     *  anywhere inside its bounds. Used to route the touch to selection handling even when
+     *  a non-select tool is active, so a just-drawn shape can be moved/resized directly. */
+    private fun selectionTouchTarget(input: InputFrame, classified: ClassifiedFrame): Boolean {
+        val bounds = selectionBoundsMm ?: return false
+        val contact = primaryContact(classified) ?: return false
+        val wx = screenToWorldX(contact.contact.x)
+        val wy = screenToWorldY(contact.contact.y)
+        if (hitTestSelectionHandle(bounds, wx, wy) >= 0) return true
+        return bounds.contains(wx, wy)
     }
 
     private fun handleSelection(input: InputFrame, classified: ClassifiedFrame) {
@@ -1255,10 +1238,9 @@ class InkCanvasView @JvmOverloads constructor(
             canvas.drawRect(lasso, lassoStrokePaint)
         }
 
-        // Palm rest zone: a translucent reserved region so the user can see exactly where
-        // to rest their hand. Re-synced on draw so the box always matches the rect that is
-        // actually active (it follows the pen in AUTO mode). The grip handle at the
-        // top-center can be dragged to move it.
+        // Palm rest zone: only drawn in MANUAL mode — a translucent reserved region the
+        // user placed and can drag by its grip handle. AUTO mode is purely automatic
+        // (contact-size based) and deliberately shows no box.
         syncPalmZoneRect()
         lastZoneRect?.let { zone ->
             val zonePaint = Paint().apply {

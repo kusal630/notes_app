@@ -217,6 +217,24 @@ class PalmClassifier(
         //  - even the smallest contact is itself palm-sized (two palms resting, no pen)
         //    => a palm, because nothing in this frame is genuinely small.
         if (dim <= minActive * 1.0001f) {
+            // The genuinely smallest pointer. The user's simple rule: anything bigger than
+            // a finger is the palm and does nothing, so the smallest contact must keep
+            // writing. A finger-sized contact that shares the frame with a larger
+            // (palm-sized) contact is therefore the writer — even before the ratio/history
+            // checks, because this catches a finger pen landing next to a resting palm
+            // whose size ratio is below PALM_RATIO_VS_SMALLEST (e.g. an edge-resting palm
+            // the digitizer reports only ~1.5-2x a fingertip) or a pen that reports no
+            // size at all while the palm does. Without this both contacts fall through to
+            // FINGER/PALM, no writing lock is claimed, and the pair becomes a two-finger
+            // gesture that swallows the stroke.
+            if (ctx.fingerWritingEnabled) {
+                val fingerMax = settings.effectiveFingerMaxMm()
+                if (dim <= fingerMax && ctx.activeSizesMm.any { it > fingerMax }) {
+                    return result(
+                        ContactClassification.WRITING, 0.85f, ClassificationReason.SMALL_CONTACT, fingerMax, ctx
+                    )
+                }
+            }
             if (measurable.size >= 2) {
                 val secondSmallest = measurable.sorted()[1]
                 if (secondSmallest / dim >= PALM_RATIO_VS_SMALLEST) {

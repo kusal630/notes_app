@@ -7,20 +7,24 @@ package com.premiumnotes.input
  * a two-finger gesture, and never drop the writing lock. This gives the palm a reliable
  * home and makes palm rejection predictable on any hardware.
  *
- * The zone is stored in a screen-relative way so it adapts to rotation and window size:
- *  - Size is in physical millimeters (a palm is a fixed physical size).
- *  - A manual position is stored as fractions (0..1) of the screen width/height.
- *  - In AUTO mode the zone follows the active writing pointer and anchors to a bottom
- *    corner when idle, so the resting place tracks where the user actually writes.
+ * The zone is only active in MANUAL mode, where it is drawn as a box the user can drag.
+ * In AUTO mode there is no box: palm rejection is purely automatic and contact-size
+ * based (anything larger than a finger is the palm and does nothing), which keeps the
+ * writing pointer from ever being blocked by a phantom area. The zone is stored in a
+ * screen-relative way so it adapts to rotation and window size.
  */
 enum class PalmZoneMode {
-    /** No zone; purely automatic classification. */
+    /** No zone; purely automatic contact-size classification. */
     OFF,
 
-    /** The zone follows the active writing pointer and anchors to a corner when idle. */
+    /**
+     * Automatic contact-size palm rejection. No box is shown and no position-based
+     * rejection applies; a contact larger than a finger is the palm and does nothing,
+     * and the writing pointer is never blocked.
+     */
     AUTO,
 
-    /** The zone stays where the user dragged it. */
+    /** The zone stays where the user dragged it (drawn as a draggable box). */
     MANUAL,
 }
 
@@ -39,8 +43,8 @@ enum class PalmZoneSide {
  */
 data class PalmZone(
     /**
-     * Defaults to AUTO so a dedicated palm space is present out of the box: the zone
-     * anchors to a bottom corner when idle and follows the writing pointer while drawing.
+     * Defaults to AUTO: purely automatic contact-size palm rejection with no on-screen
+     * box (see [PalmZoneMode.AUTO]).
      */
     val mode: PalmZoneMode = PalmZoneMode.AUTO,
     val side: PalmZoneSide = PalmZoneSide.LEFT,

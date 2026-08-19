@@ -506,10 +506,9 @@ class NoteEditorState(
     }
 
     /**
-     * Erases objects touched at a point. One tier per action, topmost-first: ink, then
-     * shapes, then highlighters, then text, then images — matching the canvas draw order
-     * (highlighters < shapes < ink). Tapping overlapping ink + shape removes the ink
-     * first; a second tap reaches the shape underneath.
+     * Erases objects touched at a point. One action removes EVERYTHING it touches —
+     * ink, highlighters, shapes, text and images — regardless of draw order, so a scrub
+     * never leaves a half-erased page.
      */
     fun eraseAt(x: Float, y: Float, radiusMm: Float): Int {
         val hit = collectErasePoint(x, y, radiusMm)
@@ -594,15 +593,15 @@ class NoteEditorState(
         val text = _content.value.textObjects.filter { textContains(it, x, y, r) }
         val shapes = _content.value.shapeObjects.filter { shapeIntersects(it, x, y, r) }
         val images = _content.value.imageObjects.filter { imageContains(it, x, y, r) }
-        // Topmost-first: ink, shapes, highlighters, text, images.
-        return when {
-            ink.isNotEmpty() -> EraseHit(ink = ink)
-            shapes.isNotEmpty() -> EraseHit(shapes = shapes)
-            highlighters.isNotEmpty() -> EraseHit(highlighters = highlighters)
-            text.isNotEmpty() -> EraseHit(textObjects = text)
-            images.isNotEmpty() -> EraseHit(images = images)
-            else -> EraseHit()
-        }
+        // The eraser removes every content type it touches in one pass — ink, shapes,
+        // highlighters, text and images — regardless of the canvas z-order.
+        return EraseHit(
+            highlighters = highlighters,
+            textObjects = text,
+            shapes = shapes,
+            ink = ink,
+            images = images,
+        )
     }
 
     private fun collectEraseSegment(ax: Float, ay: Float, bx: Float, by: Float, r: Float): EraseHit {
@@ -615,15 +614,14 @@ class NoteEditorState(
         val text = _content.value.textObjects.filter { textIntersectsSegment(it, ax, ay, bx, by, r) }
         val shapes = _content.value.shapeObjects.filter { shapeIntersectsSegment(it, ax, ay, bx, by, r) }
         val images = _content.value.imageObjects.filter { imageIntersectsSegment(it, ax, ay, bx, by, r) }
-        // Topmost-first: ink, shapes, highlighters, text, images.
-        return when {
-            ink.isNotEmpty() -> EraseHit(ink = ink)
-            shapes.isNotEmpty() -> EraseHit(shapes = shapes)
-            highlighters.isNotEmpty() -> EraseHit(highlighters = highlighters)
-            text.isNotEmpty() -> EraseHit(textObjects = text)
-            images.isNotEmpty() -> EraseHit(images = images)
-            else -> EraseHit()
-        }
+        // The eraser removes every content type it touches in one pass.
+        return EraseHit(
+            highlighters = highlighters,
+            textObjects = text,
+            shapes = shapes,
+            ink = ink,
+            images = images,
+        )
     }
 
     private fun textContains(t: com.premiumnotes.model.TextObject, x: Float, y: Float, r: Float): Boolean {

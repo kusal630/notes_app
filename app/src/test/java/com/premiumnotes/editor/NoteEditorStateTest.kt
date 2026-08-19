@@ -296,23 +296,19 @@ class NoteEditorStateTest {
     }
 
     @Test
-    fun eraseInkThenShapeWhenOverlapping() {
+    fun eraseRemovesEverythingTouchedInOnePass() {
         val ink = stroke(1, 5f, 5f, 50f, 5f)
         val rect = shapeRect(2)
-        val s = NoteEditorState(PageContent(strokes = listOf(ink), shapeObjects = listOf(rect)))
-        // The tap overlaps BOTH the ink line and the rect interior; ink is topmost so it
-        // goes first, one tier per action.
+        val hl = highlighter(3, 0f, 3f, 20f, 3f)
+        val s = NoteEditorState(PageContent(strokes = listOf(hl, ink), shapeObjects = listOf(rect)))
+        // The tap overlaps the ink line, the rect interior AND the highlighter. The eraser
+        // removes every content type it touches in one pass — no z-order tiering.
         s.eraseAt(5f, 5f, 3f)
         assertEquals(0, s.content.value.strokes.size)
-        assertEquals(1, s.content.value.shapeObjects.size)
-        // Second tap reaches the shape underneath.
-        s.eraseAt(5f, 5f, 3f)
         assertEquals(0, s.content.value.shapeObjects.size)
-        // Two separate erase actions, so undo twice restores both.
+        // One undo restores everything removed by the single action.
         s.undo()
-        assertEquals(1, s.content.value.shapeObjects.size)
-        s.undo()
-        assertEquals(1, s.content.value.strokes.size)
+        assertEquals(2, s.content.value.strokes.size)
         assertEquals(1, s.content.value.shapeObjects.size)
     }
 

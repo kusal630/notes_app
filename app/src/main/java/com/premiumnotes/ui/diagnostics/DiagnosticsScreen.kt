@@ -217,9 +217,9 @@ fun DiagnosticsScreen(
 
                 Text("Palm rest zone", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Reserve an area of the canvas for your palm so it can never interfere " +
-                        "with writing. In Auto mode it follows where you write; you can also " +
-                        "drag the blue grip on the canvas to place it yourself.",
+                    "Auto mode rejects palms automatically by contact size (bigger than a " +
+                        "finger) with no box on the canvas. Manual mode reserves a draggable " +
+                        "blue area you can place with the grip on the canvas.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

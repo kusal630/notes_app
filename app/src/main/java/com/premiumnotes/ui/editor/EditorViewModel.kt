@@ -69,6 +69,11 @@ class EditorViewModel(
 
         override fun onShapeCommitted(shape: ShapeObject) {
             _editor.value?.addShape(shape)
+            // Select the shape right after drawing so its move/resize handles appear
+            // immediately — the user can adjust it without switching to the select tool.
+            val a = shape.points.getOrNull(0) ?: return
+            val b = shape.points.getOrNull(1) ?: return
+            _editor.value?.selectAt((a.x + b.x) / 2f, (a.y + b.y) / 2f)
         }
 
         override fun onEraseGestureBegin() {

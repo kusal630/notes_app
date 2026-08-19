@@ -200,6 +200,9 @@ class PalmRejectionEngine(
                     val added = classified.firstOrNull { it.contact.pointerId == addedId }
                     if (added != null) {
                         if (!lock.isActive) {
+                            // A palm is already resting but holds no lock: the newly added
+                            // WRITING-classified contact (a pen, or a finger with finger
+                            // writing enabled) is the intended writer and claims the lock.
                             if (added.classification == ContactClassification.WRITING) {
                                 lock.tryClaim(
                                     addedId,

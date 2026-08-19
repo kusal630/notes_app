@@ -588,4 +588,35 @@ class PalmRejectionEngineTest {
         assertEquals(600f, rect.widthPx(), 0.001f)
         assertEquals(700f, rect.heightPx(), 0.001f)
     }
+
+    // --- Bug regression: resting palm + finger pen must always produce ink -------------
+
+    @Test
+    fun fingerPenWritesNextToPalmOnlySlightlyLargerThanFinger() {
+        val e = engine()
+        // A resting palm (~18mm) reports just ~1.5x the fingertip, below the 2.5x relative
+        // ratio. The palm alone is correctly rejected by the settings threshold.
+        val palmAlone = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(palm18mm(timeMs = 0L)), added = 2)
+        )
+        assertNull(palmAlone.activeWritingPointerId)
+        assertEquals(ContactClassification.PALM, palmAlone.contactFor(2)?.classification)
+
+        // A 12mm finger pen lands next to it. The relative classifier cannot use the 2.5x
+        // ratio here, so the "smallest contact beside a palm-sized contact" rule must mark
+        // it WRITING and it must claim the writing lock — otherwise both contacts become a
+        // two-finger gesture and no ink is produced.
+        val out = e.process(
+            TestTouchFactory.frame(InputAction.POINTER_DOWN, 20L, listOf(palm18mm(timeMs = 20L), finger12mm(timeMs = 20L)), added = 0)
+        )
+        assertEquals(0, out.activeWritingPointerId)
+        assertEquals(ContactClassification.WRITING, out.contactFor(0)?.classification)
+        assertTrue(out.gesturePointerIds.isEmpty())
+    }
+
+    private fun palm18mm(pointerId: Int = 2, timeMs: Long = 0L) =
+        TestTouchFactory.contact(pointerId, 500f, 700f, timeMs, majorPx = 180f, minorPx = 150f, pressure = 1f, size = 0.25f)
+
+    private fun finger12mm(pointerId: Int = 0, timeMs: Long = 0L) =
+        TestTouchFactory.contact(pointerId, 120f, 110f, timeMs, majorPx = 120f, minorPx = 110f, pressure = 0.6f, size = 0.04f)
 }

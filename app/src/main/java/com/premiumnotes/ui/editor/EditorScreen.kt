@@ -27,12 +27,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Highlight
@@ -223,6 +225,11 @@ fun EditorScreen(
     // The page rail is a hideable overlay so the canvas stays full-screen for writing.
     var showRail by remember { mutableStateOf(false) }
 
+    // The transcript sidebar is user-closable/openable: it starts open for classroom
+    // notes (and whenever a recording/transcript exists) but the user can hide it to
+    // reclaim the canvas and reopen it from the top bar.
+    var showTranscriptSidebar by remember { mutableStateOf(true) }
+
     // A classroom note is a normal note plus the on-device audio/transcript sidebar.
     // Opening one shows the sidebar from the start (with a "record" hint) so the feature
     // is discoverable; a normal note only shows it once a recording is started.
@@ -311,6 +318,9 @@ fun EditorScreen(
                 },
                 isRecording = isRecording && recordingPageId == pageId,
                 onToggleClassroom = toggleClassroom,
+                transcriptAvailable = isClassroom ||
+                    transcript.isNotEmpty() || partial.isNotEmpty() || isRecording,
+                onToggleTranscriptSidebar = { showTranscriptSidebar = !showTranscriptSidebar },
             )
         },
         bottomBar = {
@@ -441,8 +451,10 @@ fun EditorScreen(
                 // steals the pen's touches. Visible for classroom notes from the start
                 // (live during recording, static when reopened), otherwise whenever a
                 // recording session exists for this page.
-                val showTranscript = isClassroom ||
-                    transcript.isNotEmpty() || partial.isNotEmpty() || isRecording
+                val showTranscript = showTranscriptSidebar && (
+                    isClassroom ||
+                        transcript.isNotEmpty() || partial.isNotEmpty() || isRecording
+                )
                 if (showTranscript) {
                     HorizontalDivider(
                         modifier = Modifier.width(1.dp).fillMaxHeight(),
@@ -453,6 +465,7 @@ fun EditorScreen(
                         partial = if (isRecording) partial else "",
                         isRecording = isRecording,
                         onToggleRecording = toggleClassroom,
+                        onClose = { showTranscriptSidebar = false },
                         summary = content.summary,
                         summaryEnabled = transcript.isNotEmpty(),
                         onGenerateSummary = {
@@ -498,6 +511,8 @@ private fun EditorTopBar(
     onExportPdf: () -> Unit,
     isRecording: Boolean,
     onToggleClassroom: () -> Unit,
+    transcriptAvailable: Boolean,
+    onToggleTranscriptSidebar: () -> Unit,
 ) {
     TopAppBar(
         title = {
@@ -511,6 +526,17 @@ private fun EditorTopBar(
         actions = {
             IconButton(onClick = onToggleRail) {
                 Icon(Icons.Filled.Menu, contentDescription = "Show or hide pages")
+            }
+            IconButton(
+                onClick = onToggleTranscriptSidebar,
+                // Enabled whenever a transcript/classroom note exists so the sidebar can be
+                // reopened after being hidden.
+                enabled = transcriptAvailable,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Article,
+                    contentDescription = "Show or hide transcript",
+                )
             }
             IconButton(onClick = onUndo, enabled = canUndo) {
                 Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
@@ -550,6 +576,7 @@ private fun ClassroomSidebar(
     partial: String,
     isRecording: Boolean,
     onToggleRecording: () -> Unit,
+    onClose: () -> Unit,
     summary: String?,
     summaryEnabled: Boolean,
     onGenerateSummary: () -> Unit,
@@ -559,11 +586,20 @@ private fun ClassroomSidebar(
     val listState = rememberLazyListState()
     Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.fillMaxSize().padding(12.dp)) {
-            Text(
-                text = if (isRecording) "Classroom · recording" else "Classroom notes",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (isRecording) "Classroom · recording" else "Classroom notes",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Filled.Close, contentDescription = "Hide transcript sidebar")
+                }
+            }
             if (isRecording) {
                 // A red "live" dot keeps the "still recording" state unmistakable at a glance.
                 Row(verticalAlignment = Alignment.CenterVertically) {
