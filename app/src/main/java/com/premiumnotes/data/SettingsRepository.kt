@@ -69,6 +69,10 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val PALM_GROWTH_CANCEL_KEY = booleanPreferencesKey("palm_growth_cancel")
         private val PALM_GROWTH_FACTOR_KEY = floatPreferencesKey("palm_growth_factor")
         private val DEBUG_OVERLAY_KEY = booleanPreferencesKey("debug_overlay")
+        private val MIN_PROMOTE_VELOCITY_KEY = floatPreferencesKey("min_promote_velocity_mm_s")
+        private val VELOCITY_WINDOW_KEY = longPreferencesKey("velocity_window_ms")
+        private val SIZE_GROWTH_CANCEL_KEY = floatPreferencesKey("size_growth_cancel_mm")
+        private val IMMEDIATE_DRAW_ISOLATED_KEY = booleanPreferencesKey("immediate_draw_isolated")
     }
 
     val settingsFlow: Flow<PalmRejectionSettings> = dataStore.data
@@ -113,6 +117,10 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             prefs[PALM_GROWTH_CANCEL_KEY] = current.palmGrowthCancelEnabled
             prefs[PALM_GROWTH_FACTOR_KEY] = current.palmGrowthFactor
             prefs[DEBUG_OVERLAY_KEY] = current.debugOverlayEnabled
+            prefs[MIN_PROMOTE_VELOCITY_KEY] = current.minPromoteVelocityMmPerSec
+            prefs[VELOCITY_WINDOW_KEY] = current.velocityWindowMs
+            prefs[SIZE_GROWTH_CANCEL_KEY] = current.sizeGrowthCancelThresholdMm
+            prefs[IMMEDIATE_DRAW_ISOLATED_KEY] = current.allowImmediateDrawWhenIsolated
         }
     }
 
@@ -163,5 +171,9 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             palmGrowthCancelEnabled = prefs[PALM_GROWTH_CANCEL_KEY] ?: true,
             palmGrowthFactor = prefs[PALM_GROWTH_FACTOR_KEY] ?: 2.2f,
             debugOverlayEnabled = prefs[DEBUG_OVERLAY_KEY] ?: false,
+            minPromoteVelocityMmPerSec = prefs[MIN_PROMOTE_VELOCITY_KEY] ?: 120f,
+            velocityWindowMs = prefs[VELOCITY_WINDOW_KEY] ?: 120L,
+            sizeGrowthCancelThresholdMm = prefs[SIZE_GROWTH_CANCEL_KEY] ?: 27.6f,
+            allowImmediateDrawWhenIsolated = prefs[IMMEDIATE_DRAW_ISOLATED_KEY] ?: true,
         )
 }

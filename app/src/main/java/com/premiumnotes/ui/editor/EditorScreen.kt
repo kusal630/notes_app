@@ -253,11 +253,14 @@ fun EditorScreen(
     val recordingPageId by SpeechController.recordingPageId.collectAsState()
     val classroomAvailable = remember(uiContext) { ModelDiscovery.resolve(uiContext) != null }
     var classroomNotice by remember { mutableStateOf<String?>(null) }
+    var summaryGenerating by remember { mutableStateOf(false) }
 
-    // While recording this page, mirror every recognized segment into the page content so
-    // autosave persists it (undo does not apply to transcript updates).
-    LaunchedEffect(transcript, pageId, recordingPageId, isRecording) {
-        if (isRecording && recordingPageId == pageId) {
+    // Mirror every recognized segment into the page content while this page owns the
+    // transcript — while recording AND after stop (recordingPageId survives the stop) —
+    // so autosave persists it, including the final segments the service flushes when the
+    // capture thread ends. Undo does not apply to transcript updates.
+    LaunchedEffect(transcript, pageId, recordingPageId) {
+        if (recordingPageId == pageId) {
             vm.setTranscript(transcript)
         }
     }
@@ -275,16 +278,24 @@ fun EditorScreen(
     }
 
     val toggleClassroom: () -> Unit = {
-        if (isRecording && recordingPageId == pageId) {
-            AudioCaptureService.stop(uiContext)
-            vm.setTranscript(SpeechController.segments.value)
-        } else if (!classroomAvailable) {
-            classroomNotice = "Speech model not installed. Run ./gradlew downloadVoskModel and " +
-                "rebuild to enable Classroom Notes."
-        } else if (uiContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        } else {
-            AudioCaptureService.start(uiContext, pageId)
+        run {
+            if (!isClassroom) {
+                classroomNotice = "Transcription is only available in classroom notebooks."
+                return@run
+            }
+            if (isRecording && recordingPageId == pageId) {
+                AudioCaptureService.stop(uiContext)
+                // The service flushes the final partial into segments before clearing the
+                // recording flag; the mirror LaunchedEffect persists the final transcript.
+                vm.setTranscript(SpeechController.segments.value)
+            } else if (!classroomAvailable) {
+                classroomNotice = "Speech model not installed. Run ./gradlew downloadVoskModel and " +
+                    "rebuild to enable Classroom Notes."
+            } else if (uiContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            } else {
+                AudioCaptureService.start(uiContext, pageId)
+            }
         }
     }
 
@@ -326,9 +337,9 @@ fun EditorScreen(
                 },
                 isRecording = isRecording && recordingPageId == pageId,
                 onToggleClassroom = toggleClassroom,
-                transcriptAvailable = isClassroom ||
-                    transcript.isNotEmpty() || partial.isNotEmpty() || isRecording,
+                transcriptAvailable = isClassroom,
                 onToggleTranscriptSidebar = { showTranscriptSidebar = !showTranscriptSidebar },
+                classroomEnabled = isClassroom,
             )
         },
         bottomBar = {
@@ -410,13 +421,8 @@ fun EditorScreen(
             val compact = maxWidth < 600.dp
 
             // Classroom Notes transcript sidebar: a sibling of the canvas so it never
-            // steals the pen's touches. Visible for classroom notes from the start
-            // (live during recording, static when reopened), otherwise whenever a
-            // recording session exists for this page.
-            val showTranscript = showTranscriptSidebar && (
-                isClassroom ||
-                    transcript.isNotEmpty() || partial.isNotEmpty() || isRecording
-                )
+            // steals the pen's touches. Visible ONLY for classroom notes.
+            val showTranscript = showTranscriptSidebar && isClassroom
 
             // Hardware/system back closes the transcript sidebar before leaving the note.
             BackHandler(enabled = showTranscript) {
@@ -504,8 +510,24 @@ fun EditorScreen(
                         onClose = { showTranscriptSidebar = false },
                         summary = content.summary,
                         summaryEnabled = transcript.isNotEmpty(),
+                        summaryGenerating = summaryGenerating,
                         onGenerateSummary = {
-                            vm.setSummary(SummaryGenerator.summarize(transcript))
+                            run {
+                                if (!isClassroom || summaryGenerating) return@run
+                                scope.launch {
+                                    summaryGenerating = true
+                                    try {
+                                        val result = withContext(Dispatchers.Default) {
+                                            SummaryGenerator.summarize(transcript)
+                                        }
+                                        vm.setSummary(result)
+                                    } catch (e: Exception) {
+                                        classroomNotice = "Summary generation failed: ${e.message}"
+                                    } finally {
+                                        summaryGenerating = false
+                                    }
+                                }
+                            }
                         },
                         modifier = Modifier.widthIn(min = 220.dp, max = 320.dp).fillMaxHeight(),
                     )
@@ -549,6 +571,7 @@ private fun EditorTopBar(
     onToggleClassroom: () -> Unit,
     transcriptAvailable: Boolean,
     onToggleTranscriptSidebar: () -> Unit,
+    classroomEnabled: Boolean,
 ) {
     TopAppBar(
         title = {
@@ -585,8 +608,9 @@ private fun EditorTopBar(
             }
             IconButton(
                 onClick = onToggleClassroom,
-                // Always tappable: without a bundled model the tap surfaces the "speech
-                // model not installed" notice instead of being silently disabled.
+                enabled = classroomEnabled,
+                // When not a classroom note, the button is disabled but still visible
+                // so the user can discover the feature.
             ) {
                 Icon(
                     Icons.Filled.Mic,
@@ -615,6 +639,7 @@ private fun ClassroomSidebar(
     onClose: () -> Unit,
     summary: String?,
     summaryEnabled: Boolean,
+    summaryGenerating: Boolean = false,
     onGenerateSummary: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -758,12 +783,12 @@ private fun ClassroomSidebar(
                     Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = onGenerateSummary,
-                        enabled = summaryEnabled,
+                        enabled = summaryEnabled && !summaryGenerating,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Filled.Summarize, contentDescription = null)
                         Spacer(Modifier.width(4.dp))
-                        Text(if (summary != null) "Regenerate summary" else "Generate summary")
+                        Text(if (summaryGenerating) "Generating…" else if (summary != null) "Regenerate summary" else "Generate summary")
                     }
                 }
             }

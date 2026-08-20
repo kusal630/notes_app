@@ -141,24 +141,67 @@ edge evidence on top of the size decision. It is stateless w.r.t. the classifier
 
 Rules (see `RestingHandTracker.kt` for the implementation):
 
+- **Velocity-gated stroke detection** — "stroke-like motion" is judged over a sliding
+  velocity window (`velocityWindowMs`, default 120 ms, kept within the 80–180 ms design
+  budget) using the *windowed* velocity (displacement between the oldest and newest sample
+  in the window ÷ window span), not raw instantaneous speed. A contact counts as a stroke
+  only when `windowedVelocity ≥ effectivePromoteVelocity` **and** its total path length ≥
+  `movementPromoteThresholdMm`. A slow, jittery resting hand can therefore never look like
+  a writer even if it drifts a few millimeters.
+- **Adaptive stroke gate** — the promote velocity is raised when the resting hand itself
+  produces motion: `effectivePromoteVelocity = max(minPromoteVelocityMmPerSec,
+  restingNoiseMmPerSec × 3)`, where `restingNoiseMmPerSec` is an exponential moving average
+  of the windowed velocity that currently-`RESTING` contacts actually produce (decay 0.8).
+  A hard-resting hand cannot drown out a real stroke, and the gate decays back to the
+  configured minimum when nothing is resting.
+- **Hand-shift drift rejection** — a whole-hand re-anchor shows up as a cluster of ≥ 2
+  contacts moving together at the same slow pace, none of which has stroke-like velocity.
+  Such contacts are `RESTING` (`HAND_SHIFT_DRIFT`) instead of becoming a gesture or a
+  writer, so shifting your hand mid-writing does not produce stray strokes.
 - **Ambiguity-gated buffering** — a new small contact is held as `CANDIDATE` (never drawn,
   never a gesture) only when there is genuine ambiguity: an already-established `RESTING`
   finger is present, or the frame has ≥ 3 contacts with ≥ 2 non-palm, non-tool "ambiguous"
   small contacts. A pen next to a pair of large palms is *not* ambiguous (the palms are
-  already confidently rejected), so it claims the lock immediately.
+  already confidently rejected), so it claims the lock immediately. With
+  `allowImmediateDrawWhenIsolated = true` an isolated contact (no resting hand nearby)
+  draws immediately without buffering; when `false` even isolated contacts are observed
+  until they move like a stroke.
 - **Promotion** — a buffered `CANDIDATE` is promoted to `WRITING` and claims the writing
-  lock the moment it is the *only* mover (`movingIds.size == 1`) and has travelled ≥
-  `movementPromoteThresholdMm`. Two movers together stay `FINGER`, so two-finger pan/zoom
-  keeps working with a resting palm on the screen.
+  lock the moment it is the *only* mover (`movingIds.size == 1`) and moves like a stroke.
+  Two stroke-like movers together stay `FINGER`, so two-finger pan/zoom keeps working with
+  a resting palm on the screen.
 - **Resting fingers** — a stationary small contact in a resting context (≥ 3 contacts,
   near a screen edge, a stationary cluster, or a palm present) becomes `RESTING` after
   `stationaryRestTimeMs` and neither draws nor drives gestures. It can be re-promoted to
-  `WRITING` if it becomes the unique mover (the user starts writing with a finger that was
-  already resting).
+  `WRITING` if it becomes the unique mover and moves like a stroke (the user starts
+  writing with a finger that was already resting).
 - **Sticky locked writer** — a locked writing pointer is never demoted for pausing; it is
   only cancelled when its *smoothed* contact size grows into palm territory
-  (`smoothed ≥ palmSizeThresholdMm × 1.15` **and** `≥ initialSize × palmGrowthFactor`),
+  (`smoothed ≥ sizeGrowthCancelThresholdMm` **and** `≥ initialSize × palmGrowthFactor`),
   so a single digitizer spike never kills an in-progress stroke.
+
+### Diagnostic signals
+
+Every classified contact also carries, for the debug overlay and tests:
+
+- `windowedVelocityMmPerSec` — velocity over the sliding window.
+- `pathLengthMm` — total distance travelled since down.
+- `writeScore` — weighted evidence the contact is a deliberate stroke
+  (0.4·velocity + 0.25·path + 0.2·continuity + 0.15·size).
+- `restScore` — weighted evidence the contact is a resting hand
+  (0.4·stationarity + 0.2·cluster + 0.15·edge + 0.15·size + 0.1·growth).
+
+The frame also reports `clusterBounds` (bounding boxes of resting clusters) which the
+debug overlay draws so the whole resting hand — not just one finger — is visible.
+
+### Settings (velocity / adaptive knobs)
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `minPromoteVelocityMmPerSec` | 120 | Minimum windowed velocity (mm/s) to count as a stroke. |
+| `velocityWindowMs` | 120 | Sliding window duration for velocity & continuity (80–180 ms). |
+| `sizeGrowthCancelThresholdMm` | 27.6 | Smoothed size above which a locked writer is cancelled as a palm (palmSizeThreshold × 1.15). |
+| `allowImmediateDrawWhenIsolated` | true | Buffer even isolated contacts until they move like a stroke. |
 
 ### Master switch
 

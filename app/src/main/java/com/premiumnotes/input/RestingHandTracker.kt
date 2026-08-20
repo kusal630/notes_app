@@ -1,6 +1,7 @@
 package com.premiumnotes.input
 
 import kotlin.math.hypot
+import kotlin.math.max
 
 /**
  * Resting-hand / palm rejection layer that runs AFTER the size-based [PalmClassifier].
@@ -25,6 +26,16 @@ import kotlin.math.hypot
  *    when its SMOOTHED contact size grows into palm territory (with hysteresis), so a
  *    single digitizer spike never kills an in-progress stroke.
  *
+ * Motion is scored over a sliding velocity window ([PalmRejectionSettings.velocityWindowMs],
+ * kept within the 80–180 ms design budget):
+ *  - "Stroke-like motion" is gated by the WINDOWED velocity, not raw instantaneous speed,
+ *    so a slow, jittery resting hand is not confused with a deliberate stroke.
+ *  - The promote threshold is adaptive: it is raised when the resting hand itself produces
+ *    high windowed velocity (resting-noise EMA), so a hard-resting hand cannot drown out
+ *    the writer.
+ *  - A whole-hand slow drift shows up as a cluster of contacts moving together below the
+ *    stroke threshold and is rejected as a hand shift, not a stroke.
+ *
  * The tracker is stateless w.r.t. the base classifier: it only adds motion/timing/cluster
  * evidence on top of the size decision, so disabling [PalmRejectionSettings.restingHandModeEnabled]
  * restores the exact legacy behavior.
@@ -39,9 +50,18 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
         val promoteCandidatePointerId: Int?,
         /** The locked writing pointer whose smoothed size grew palm-like and must be cancelled. */
         val cancelLockPointerId: Int?,
+        /** Bounding boxes of resting clusters (>= 2 resting contacts), for the debug overlay. */
+        val clusterBounds: List<ClusterBounds> = emptyList(),
     )
 
     private val pointerStates = HashMap<Int, PointerMotionState>()
+
+    /**
+     * Adaptive estimate of the resting hand's windowed-velocity noise (mm/s). EMA of the
+     * velocity produced by currently-resting contacts; the stroke gate is
+     * max(minPromoteVelocityMmPerSec, restingNoise * PROMOTE_VS_NOISE).
+     */
+    private var restingNoiseMmPerSec: Float = 0f
 
     /** Viewport size in screen px, set by the canvas (used for edge detection). */
     var viewportWidthPx: Float = 0f
@@ -49,6 +69,7 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
 
     fun reset() {
         pointerStates.clear()
+        restingNoiseMmPerSec = 0f
     }
 
     /**
@@ -74,7 +95,7 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
             val st = pointerStates[id]
             if (st == null) {
                 val size = c.contact.maxDimMm
-                pointerStates[id] = PointerMotionState(
+                val ns = PointerMotionState(
                     downTimeNanos = c.contact.downTimeNanos,
                     startX = c.contact.x,
                     startY = c.contact.y,
@@ -85,8 +106,10 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                     smoothedContactSizeMm = size,
                     lastContactSizeMm = size,
                 )
+                ns.recentSamples.addLast(MotionSample(nowNanos, c.contact.x, c.contact.y))
+                pointerStates[id] = ns
             } else {
-                val dtMs = (c.contact.eventTimeNanos - st.lastTimeNanos) / 1_000_000L
+                val dtMs = (nowNanos - st.lastTimeNanos) / 1_000_000L
                 val distPx = hypot(c.contact.x - st.lastX, c.contact.y - st.lastY)
                 st.lastFrameDistPx = distPx
                 st.totalDistPx += distPx
@@ -95,15 +118,37 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                 } else 0f
                 st.lastX = c.contact.x
                 st.lastY = c.contact.y
-                st.lastTimeNanos = c.contact.eventTimeNanos
+                st.lastTimeNanos = nowNanos
                 if (distPx > pxPerMm * MOVEMENT_JITTER_MM) {
-                    st.lastMoveTimeNanos = c.contact.eventTimeNanos
+                    st.lastMoveTimeNanos = nowNanos
                 }
                 val size = c.contact.maxDimMm
                 st.smoothedContactSizeMm =
                     st.smoothedContactSizeMm * (1f - SIZE_SMOOTH_FACTOR) + size * SIZE_SMOOTH_FACTOR
                 st.lastContactSizeMm = size
                 st.rawSampleCount++
+
+                // --- Sliding velocity window (pruned to the configured window, >= 2 samples) ---
+                st.recentSamples.addLast(MotionSample(nowNanos, c.contact.x, c.contact.y))
+                val windowCutoff = nowNanos - settings.velocityWindowMs * 1_000_000L
+                while (st.recentSamples.size > 2 && st.recentSamples.first().timeNanos < windowCutoff) {
+                    st.recentSamples.removeFirst()
+                }
+                val spanMs =
+                    (st.recentSamples.last().timeNanos - st.recentSamples.first().timeNanos) / 1_000_000L
+                st.windowedVelocityMmPerSec = if (st.recentSamples.size >= 2 && spanMs > 0) {
+                    val dx = st.recentSamples.last().x - st.recentSamples.first().x
+                    val dy = st.recentSamples.last().y - st.recentSamples.first().y
+                    capabilities.dimFromPx(hypot(dx, dy)) / (spanMs / 1000f)
+                } else 0f
+                st.movingSampleCount = 0
+                for (i in 1 until st.recentSamples.size) {
+                    val a = st.recentSamples[i - 1]
+                    val b = st.recentSamples[i]
+                    if (hypot(b.x - a.x, b.y - a.y) > pxPerMm * MOVEMENT_JITTER_MM) {
+                        st.movingSampleCount++
+                    }
+                }
             }
         }
         pointerStates.keys.retainAll(presentIds)
@@ -123,12 +168,19 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
         fun stationaryMs(st: PointerMotionState): Long =
             ((nowNanos - st.lastMoveTimeNanos) / 1_000_000L).coerceAtLeast(0L)
 
-        fun movedEnough(st: PointerMotionState): Boolean =
-            capabilities.dimFromPx(st.totalDistPx) >= settings.movementPromoteThresholdMm
+        /** The adaptive stroke gate: resting-hand noise forces a higher minimum velocity. */
+        fun effectivePromoteVelocity(): Float =
+            max(settings.minPromoteVelocityMmPerSec, restingNoiseMmPerSec * PROMOTE_VS_NOISE)
 
-        fun movedLikeStroke(st: PointerMotionState): Boolean =
-            capabilities.dimFromPx(st.totalDistPx) >= settings.movementPromoteThresholdMm * 2f &&
-                st.lastFrameDistPx > pxPerMm * MOVEMENT_JITTER_MM
+        /**
+         * "Stroke-like motion" = the contact is moving fast enough over the velocity window
+         * to be a deliberate stroke, AND it has travelled far enough in total to not be a
+         * fresh-down artifact. Velocity-gating means a slow, jittery resting finger never
+         * looks like a writer even if it drifts a few mm.
+         */
+        fun strokeLikeMotion(st: PointerMotionState): Boolean =
+            st.windowedVelocityMmPerSec >= effectivePromoteVelocity() &&
+                capabilities.dimFromPx(st.totalDistPx) >= settings.movementPromoteThresholdMm
 
         val restingCount = baseClassified.count {
             pointerStates[it.contact.pointerId]?.restingClassification == ContactClassification.RESTING
@@ -194,6 +246,24 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                 inRestingCluster(c.contact.pointerId)
 
         /**
+         * True when [pointerId] is part of a cluster of >= 2 contacts where at least two of
+         * them moved this frame but NONE has stroke-like velocity. This is the signature of
+         * a whole-hand shift (e.g. re-anchoring the palm): the hand moves slowly and
+         * coherently, and must not be treated as a writing stroke or a gesture.
+         */
+        fun inDriftingCluster(pointerId: Int): Boolean {
+            val members = clusterMembers[root(pointerId)] ?: return false
+            if (members.size < 2) return false
+            var movingCount = 0
+            for (m in members) {
+                val st = pointerStates[m] ?: return false
+                if (st.lastFrameDistPx > pxPerMm * MOVEMENT_JITTER_MM) movingCount++
+                if (st.windowedVelocityMmPerSec >= effectivePromoteVelocity()) return false
+            }
+            return movingCount >= 2
+        }
+
+        /**
          * Number of contacts the size classifier could NOT confidently reject (non-palm,
          * non-tool). A pen next to a pair of large palms is the only such contact — not
          * ambiguous — so it must write immediately. A resting hand, by contrast, shows up
@@ -234,7 +304,7 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                 c.contact.pointerId == activeWritingPointerId
             ) {
                 null
-            } else if (movedEnough(st)) c.contact.pointerId else null
+            } else if (strokeLikeMotion(st)) c.contact.pointerId else null
         }.toSet()
 
         val adjusted = ArrayList<ClassifiedContact>(baseClassified.size)
@@ -270,7 +340,7 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                     // in-progress stroke.
                     val grew = settings.palmGrowthCancelEnabled &&
                         st.initialContactSizeMm > 0f &&
-                        st.smoothedContactSizeMm >= settings.palmSizeThresholdMm * PALM_GROWTH_HYSTERESIS &&
+                        st.smoothedContactSizeMm >= settings.sizeGrowthCancelThresholdMm &&
                         st.smoothedContactSizeMm >= st.initialContactSizeMm * settings.palmGrowthFactor
                     if (grew) {
                         finalCls = ContactClassification.PALM
@@ -292,7 +362,8 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                             // writing with a finger that was already resting on the screen).
                             if (activeWritingPointerId == null &&
                                 movingIds.isEmpty() &&
-                                movedLikeStroke(st)
+                                strokeLikeMotion(st) &&
+                                st.lastFrameDistPx > pxPerMm * MOVEMENT_JITTER_MM
                             ) {
                                 finalCls = ContactClassification.WRITING
                                 reason = ClassificationReason.PROMOTED_TO_WRITING
@@ -304,10 +375,11 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                         }
 
                         st.isNew -> {
-                            // A brand-new contact. In a resting context it is buffered as a
-                            // CANDIDATE (observed until it moves); otherwise it keeps its base
-                            // classification (isolated touch fast path, or a gesture finger).
-                            if (candidateContext()) {
+                            // A brand-new contact. In a resting context (or when immediate
+                            // drawing is disabled) it is buffered as a CANDIDATE (observed
+                            // until it moves); otherwise it keeps its base classification
+                            // (isolated touch fast path, or a gesture finger).
+                            if (candidateContext() || !settings.allowImmediateDrawWhenIsolated) {
                                 finalCls = ContactClassification.CANDIDATE
                                 reason = ClassificationReason.CANDIDATE_BUFFER
                             }
@@ -315,7 +387,7 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
 
                         st.restingClassification == ContactClassification.CANDIDATE -> {
                             when {
-                                movedEnough(st) -> {
+                                strokeLikeMotion(st) -> {
                                     if (activeWritingPointerId == null &&
                                         movingIds.size == 1 &&
                                         movingIds.contains(id)
@@ -334,6 +406,11 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                                 stationaryMs(st) >= settings.candidateEvaluationWindowMs -> {
                                     finalCls = ContactClassification.RESTING
                                     reason = restingReason(c)
+                                }
+                                inDriftingCluster(id) -> {
+                                    // Slow coherent whole-hand movement is not a stroke.
+                                    finalCls = ContactClassification.RESTING
+                                    reason = ClassificationReason.HAND_SHIFT_DRIFT
                                 }
                                 else -> {
                                     finalCls = ContactClassification.CANDIDATE
@@ -366,6 +443,13 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
 
             st.restingClassification = finalCls
 
+            val minVel = effectivePromoteVelocity()
+            val writeScore = writeScoreFor(st, minVel, settings)
+            val restScore = restScoreFor(
+                st, settings,
+                inRestingCluster(id), nearEdge(c.contact),
+            )
+
             adjusted += ClassifiedContact(
                 contact = c.contact,
                 classification = finalCls,
@@ -376,13 +460,85 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                 durationMs = (nowNanos - st.downTimeNanos) / 1_000_000L,
                 downX = st.startX,
                 downY = st.startY,
+                windowedVelocityMmPerSec = st.windowedVelocityMmPerSec,
+                pathLengthMm = capabilities.dimFromPx(st.totalDistPx),
+                writeScore = writeScore,
+                restScore = restScore,
+            )
+        }
+
+        // Adaptive resting-noise estimate: EMA of the velocity the resting contacts actually
+        // produce, so a hard-resting hand raises the stroke gate and stops getting mistaken
+        // for a writer. Decays back toward the configured minimum when nothing is resting.
+        var maxNoise = 0f
+        for (ac in adjusted) {
+            if (ac.classification == ContactClassification.RESTING) {
+                val st = pointerStates[ac.contact.pointerId] ?: continue
+                maxNoise = max(maxNoise, max(st.windowedVelocityMmPerSec, st.speedMmPerSec))
+            }
+        }
+        restingNoiseMmPerSec =
+            restingNoiseMmPerSec * RESTING_NOISE_DECAY + maxNoise * (1f - RESTING_NOISE_DECAY)
+
+        // Cluster bounds for the debug overlay: bounding boxes of groups of >= 2 resting
+        // contacts (visualizes where the hand is resting).
+        val clusterBounds = ArrayList<ClusterBounds>()
+        val restByRoot = HashMap<Int, MutableList<NormalizedContact>>()
+        for (ac in adjusted) {
+            if (ac.classification == ContactClassification.RESTING) {
+                val r = root(ac.contact.pointerId)
+                restByRoot.getOrPut(r) { mutableListOf() }.add(ac.contact)
+            }
+        }
+        for (members in restByRoot.values) {
+            if (members.size < 2) continue
+            clusterBounds += ClusterBounds(
+                minX = members.minOf { it.x },
+                minY = members.minOf { it.y },
+                maxX = members.maxOf { it.x },
+                maxY = members.maxOf { it.y },
             )
         }
 
         // The next frame must see this pointer as established, not "new".
         for (id in presentIds) pointerStates[id]?.isNew = false
 
-        return Result(adjusted, promoteId, cancelId)
+        return Result(adjusted, promoteId, cancelId, clusterBounds)
+    }
+
+    /** How much the contact looks like a deliberate stroke (0..1), for diagnostics. */
+    private fun writeScoreFor(
+        st: PointerMotionState,
+        minVel: Float,
+        settings: PalmRejectionSettings,
+    ): Float {
+        val velScore = (st.windowedVelocityMmPerSec / minVel).coerceIn(0f, 1f)
+        val pathScore =
+            (capabilities.dimFromPx(st.totalDistPx) / settings.movementPromoteThresholdMm).coerceIn(0f, 1f)
+        val contScore = if (st.recentSamples.size <= 1) 0f
+        else st.movingSampleCount.toFloat() / (st.recentSamples.size - 1).toFloat()
+        val sizeScore = (1f - st.smoothedContactSizeMm / settings.palmSizeThresholdMm).coerceIn(0f, 1f)
+        return velScore * VEL_WEIGHT + pathScore * PATH_WEIGHT +
+            contScore * CONT_WEIGHT + sizeScore * SIZE_WEIGHT
+    }
+
+    /** How much the contact looks like a resting hand (0..1), for diagnostics. */
+    private fun restScoreFor(
+        st: PointerMotionState,
+        settings: PalmRejectionSettings,
+        inCluster: Boolean,
+        edgeAdjacent: Boolean,
+    ): Float {
+        val statScore = if (st.recentSamples.size <= 1) 1f
+        else 1f - st.movingSampleCount.toFloat() / (st.recentSamples.size - 1).toFloat()
+        val clusterScore = if (inCluster) 1f else 0f
+        val edgeScore = if (edgeAdjacent) 1f else 0f
+        val sizeScore = (st.smoothedContactSizeMm / settings.palmSizeThresholdMm).coerceIn(0f, 1f)
+        val growthRatio =
+            if (st.initialContactSizeMm > 0f) st.smoothedContactSizeMm / st.initialContactSizeMm else 0f
+        val growthScore = (growthRatio / settings.palmGrowthFactor).coerceIn(0f, 1f)
+        return statScore * STAT_WEIGHT + clusterScore * CLUSTER_WEIGHT +
+            edgeScore * EDGE_WEIGHT + sizeScore * REST_SIZE_WEIGHT + growthScore * GROWTH_WEIGHT
     }
 
     private fun restingConfidence(classification: ContactClassification): Float = when (classification) {
@@ -401,7 +557,26 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
         /** Blend factor for the exponential moving average of contact size. */
         const val SIZE_SMOOTH_FACTOR = 0.3f
 
-        /** Hysteresis multiplier applied to the palm-size threshold before cancelling a writer. */
+        /** Legacy hysteresis multiplier (kept for reference; size-growth now uses its own threshold). */
         const val PALM_GROWTH_HYSTERESIS = 1.15f
+
+        /** Resting-hand noise must be exceeded by this factor before a contact counts as a stroke. */
+        const val PROMOTE_VS_NOISE = 3f
+
+        /** EMA decay for the adaptive resting-noise estimate (higher = slower adaptation). */
+        const val RESTING_NOISE_DECAY = 0.8f
+
+        // Write-score evidence weights.
+        const val VEL_WEIGHT = 0.4f
+        const val PATH_WEIGHT = 0.25f
+        const val CONT_WEIGHT = 0.2f
+        const val SIZE_WEIGHT = 0.15f
+
+        // Rest-score evidence weights.
+        const val STAT_WEIGHT = 0.4f
+        const val CLUSTER_WEIGHT = 0.2f
+        const val EDGE_WEIGHT = 0.15f
+        const val REST_SIZE_WEIGHT = 0.15f
+        const val GROWTH_WEIGHT = 0.1f
     }
 }

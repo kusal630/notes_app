@@ -24,7 +24,13 @@ object SpeechController {
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
-    /** Page the current recording is attached to (cleared on stop). */
+    /**
+     * Page the current transcript belongs to. Set when a recording starts and kept after
+     * the recording stops (it is only replaced when a new recording begins) so the editor
+     * keeps mirroring late-arriving final segments into the page after the service stops.
+     * Null when no recording has ever been started (or a previously-loaded transcript has
+     * been reattached via [setSegments]).
+     */
     private val _recordingPageId = MutableStateFlow<Long?>(null)
     val recordingPageId: StateFlow<Long?> = _recordingPageId.asStateFlow()
 
@@ -54,11 +60,32 @@ object SpeechController {
         _partial.value = text
     }
 
-    /** Stops a session; keeps the accumulated transcript for the page it was attached to. */
-    fun endRecording() {
+    /**
+     * Stops a session: flushes the live partial hypothesis into a final segment so the
+     * last spoken phrase is never lost, clears the recording flag and keeps the transcript
+     * attached to its page (so late-arriving final segments are still mirrored into the
+     * page content until a new recording begins).
+     *
+     * [elapsedMs] is the time since the recording started (segments are timestamped
+     * relative to the start); when omitted the flush falls back to the wall clock.
+     */
+    fun endRecording(elapsedMs: Long? = null) {
+        flushPartial(elapsedMs)
         _isRecording.value = false
         _partial.value = ""
-        _recordingPageId.value = null
+    }
+
+    /** Flushes the current non-blank partial hypothesis as a finalized segment. */
+    private fun flushPartial(elapsedMs: Long?) {
+        val text = _partial.value.trim()
+        if (text.isEmpty()) return
+        val endMs = elapsedMs ?: System.currentTimeMillis()
+        _segments.value = _segments.value + TranscriptSegment(
+            id = nextSegmentId.incrementAndGet(),
+            startMs = (_segments.value.lastOrNull()?.endMs ?: 0L).coerceAtLeast(0L),
+            endMs = endMs,
+            text = text,
+        )
     }
 
     /** Replaces the whole transcript (used when reopening a saved page). */

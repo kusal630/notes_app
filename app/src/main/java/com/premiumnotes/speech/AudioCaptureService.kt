@@ -29,6 +29,7 @@ class AudioCaptureService : Service() {
 
     private var captureThread: Thread? = null
     private var recognizer: VoskSpeechToText? = null
+    private var audioRecord: AudioRecord? = null
     private var startedAtMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -51,6 +52,9 @@ class AudioCaptureService : Service() {
 
     private fun startRecording(pageId: Long) {
         if (captureThread?.isAlive == true) return
+        // startForegroundService() requires startForeground() within 5 seconds even on the
+        // failure paths below, so go foreground first and only then validate.
+        startAsForeground()
         // Defensive re-check: the UI requests the microphone permission before starting
         // the service, but the user may revoke it while the service is running.
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -70,7 +74,6 @@ class AudioCaptureService : Service() {
         recognizer = rec
         SpeechController.beginRecording(pageId)
         startedAtMs = System.currentTimeMillis()
-        startAsForeground()
         captureThread = Thread({ runCapture(rec) }, "vosk-capture").also { it.start() }
     }
 
@@ -116,6 +119,7 @@ class AudioCaptureService : Service() {
             AudioFormat.ENCODING_PCM_16BIT,
             bufferSize,
         )
+        audioRecord = record
         try {
             if (record.state != AudioRecord.STATE_INITIALIZED) return
             record.startRecording()
@@ -143,9 +147,17 @@ class AudioCaptureService : Service() {
     }
 
     private fun stopRecording() {
-        captureThread?.interrupt()
+        // Idempotent: safe to call multiple times.
+        val thread = captureThread
         captureThread = null
-        SpeechController.endRecording()
+        // Unblock the blocking AudioRecord.read() immediately so the thread can exit. If the
+        // record is not actually recording, stop() throws — that is fine, ignore it.
+        runCatching { audioRecord?.stop() }
+        audioRecord = null
+        thread?.interrupt()
+        // Wait briefly for the thread to terminate; the finally block releases resources.
+        thread?.join(500)
+        SpeechController.endRecording(System.currentTimeMillis() - startedAtMs)
         recognizer = null
     }
 

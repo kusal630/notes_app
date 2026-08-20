@@ -264,4 +264,283 @@ class RestingHandEngineTest {
         assertEquals(ContactClassification.RESTING, resting.contactFor(1)?.classification)
         assertEquals(ClassificationReason.RESTING_EDGE, resting.contactFor(1)?.reason)
     }
+
+    @Test
+    fun velocityBelowThresholdKeepsCandidateResting() {
+        val e = engine()
+
+        // A palm rests, then two fingers land (both buffered as CANDIDATE).
+        e.process(TestTouchFactory.frame(
+            InputAction.DOWN, 0L, listOf(TestTouchFactory.palm(2, timeMs = 0L)), added = 2))
+        e.process(TestTouchFactory.frame(
+            InputAction.POINTER_DOWN, 10L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 100f, 100f, 10L),
+                fingertip(3, 300f, 100f, 10L),
+            ), added = 3))
+
+        // Finger 3 drifts slowly (20px = 2mm over 50ms = 40mm/s, below the 120mm/s stroke
+        // gate). Even though it moved > jitter, it must NOT promote and must NOT become a
+        // gesture: it stays CANDIDATE.
+        val slow = e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 60L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 100f, 100f, 10L),
+                fingertip(3, 320f, 100f, 10L),
+            )))
+        assertEquals(ContactClassification.CANDIDATE, slow.contactFor(3)?.classification)
+        assertNull(slow.activeWritingPointerId)
+        assertTrue(slow.gesturePointerIds.isEmpty())
+
+        // Once it stops moving for the evaluation window it is demoted to RESTING.
+        val resting = e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 400L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 100f, 100f, 10L),
+                fingertip(3, 320f, 100f, 10L),
+            )))
+        assertEquals(ContactClassification.RESTING, resting.contactFor(3)?.classification)
+    }
+
+    @Test
+    fun slowHandShiftDoesNotBlockWriterPromotion() {
+        val e = engine()
+
+        // A palm rests and two fingers land (both buffered as CANDIDATE).
+        e.process(TestTouchFactory.frame(
+            InputAction.DOWN, 0L, listOf(TestTouchFactory.palm(2, timeMs = 0L)), added = 2))
+        e.process(TestTouchFactory.frame(
+            InputAction.POINTER_DOWN, 10L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 100f, 100f, 10L),
+                fingertip(3, 300f, 100f, 10L),
+            ), added = 3))
+        e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 100L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 100f, 100f, 10L),
+                fingertip(3, 300f, 100f, 10L),
+            )))
+
+        // Both fingers shift slowly and coherently (16px over 40ms = 40mm/s): a whole-hand
+        // drift, not a stroke and not a gesture. They are reclassified RESTING via the
+        // hand-shift rule.
+        val shifted = e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 140L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 116f, 100f, 10L),
+                fingertip(3, 316f, 100f, 10L),
+            )))
+        assertEquals(ContactClassification.RESTING, shifted.contactFor(1)?.classification)
+        assertEquals(ClassificationReason.HAND_SHIFT_DRIFT, shifted.contactFor(1)?.reason)
+        assertEquals(ContactClassification.RESTING, shifted.contactFor(3)?.classification)
+        assertTrue(shifted.gesturePointerIds.isEmpty())
+
+        // A writer lands afterwards and moves fast: still promoted even though a slow hand
+        // shift was just rejected.
+        e.process(TestTouchFactory.frame(
+            InputAction.POINTER_DOWN, 150L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 116f, 100f, 10L),
+                fingertip(3, 316f, 100f, 10L),
+                writer(0, 100f, 400f, 150L),
+            ), added = 0))
+        val promoted = e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 160L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 116f, 100f, 10L),
+                fingertip(3, 316f, 100f, 10L),
+                writer(0, 180f, 400f, 150L),
+            )))
+        assertEquals(ContactClassification.WRITING, promoted.contactFor(0)?.classification)
+        assertEquals(ClassificationReason.PROMOTED_TO_WRITING, promoted.contactFor(0)?.reason)
+        assertEquals(0, promoted.activeWritingPointerId)
+    }
+
+    @Test
+    fun fastStrokeAfterPauseStillPromotes() {
+        val e = engine()
+
+        // Three fingers land and rest long enough to become RESTING.
+        e.process(TestTouchFactory.frame(
+            InputAction.DOWN, 0L, listOf(fingertip(1, 150f, 300f, 0L)), added = 1))
+        e.process(TestTouchFactory.frame(
+            InputAction.POINTER_DOWN, 10L,
+            listOf(fingertip(1, 150f, 300f, 0L), fingertip(3, 500f, 300f, 10L)), added = 3))
+        e.process(TestTouchFactory.frame(
+            InputAction.POINTER_DOWN, 20L,
+            listOf(
+                fingertip(1, 150f, 300f, 0L),
+                fingertip(3, 500f, 300f, 10L),
+                fingertip(4, 800f, 300f, 20L),
+            ), added = 4))
+        e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 100L,
+            listOf(
+                fingertip(1, 150f, 300f, 0L),
+                fingertip(3, 500f, 300f, 10L),
+                fingertip(4, 800f, 300f, 20L),
+            )))
+        val resting = e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 400L,
+            listOf(
+                fingertip(1, 150f, 300f, 0L),
+                fingertip(3, 500f, 300f, 10L),
+                fingertip(4, 800f, 300f, 20L),
+            )))
+        assertEquals(ContactClassification.RESTING, resting.contactFor(1)?.classification)
+
+        // After the pause, finger 1 breaks into a fast stroke: it is promoted to the writer.
+        val resumed = e.process(TestTouchFactory.frame(
+            InputAction.MOVE, 410L,
+            listOf(
+                fingertip(1, 260f, 320f, 0L),
+                fingertip(3, 500f, 300f, 10L),
+                fingertip(4, 800f, 300f, 20L),
+            )))
+        assertEquals(ContactClassification.WRITING, resumed.contactFor(1)?.classification)
+        assertEquals(ClassificationReason.PROMOTED_TO_WRITING, resumed.contactFor(1)?.reason)
+        assertEquals(1, resumed.activeWritingPointerId)
+    }
+
+    @Test
+    fun allowImmediateDrawWhenIsolatedFalseBuffersIsolatedContact() {
+        // A lone contact normally draws immediately; with the setting off it is observed
+        // as a CANDIDATE until it moves like a stroke.
+        val buffered = engine { allowImmediateDrawWhenIsolated = false }
+        val down = buffered.process(TestTouchFactory.frame(
+            InputAction.DOWN, 0L, listOf(writer(0, 100f, 100f, 0L)), added = 0))
+        assertEquals(ContactClassification.CANDIDATE, down.contactFor(0)?.classification)
+        assertNull(down.activeWritingPointerId)
+
+        val promoted = buffered.process(TestTouchFactory.frame(
+            InputAction.MOVE, 10L, listOf(writer(0, 180f, 100f, 0L))))
+        assertEquals(ContactClassification.WRITING, promoted.contactFor(0)?.classification)
+        assertEquals(0, promoted.activeWritingPointerId)
+
+        // Control: with the default (true) the same lone contact writes immediately.
+        val immediate = engine()
+        val downDefault = immediate.process(TestTouchFactory.frame(
+            InputAction.DOWN, 0L, listOf(writer(0, 100f, 100f, 0L)), added = 0))
+        assertEquals(ContactClassification.WRITING, downDefault.contactFor(0)?.classification)
+        assertEquals(0, downDefault.activeWritingPointerId)
+    }
+
+    @Test
+    fun adaptiveNoiseRaisesPromoteVelocity() {
+        // Setup: palm + two resting fingers. The fingers then either stay perfectly still
+        // (control) or produce steady low-velocity jitter (noisy). In both engines a new
+        // writer moves at 160mm/s — above the 120mm/s configured minimum.
+        fun restingFrames(e: PalmRejectionEngine, finger1x: Float, finger3x: Float) {
+            e.process(TestTouchFactory.frame(
+                InputAction.DOWN, 0L, listOf(TestTouchFactory.palm(2, timeMs = 0L)), added = 2))
+            e.process(TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 10L,
+                listOf(
+                    TestTouchFactory.palm(2, timeMs = 0L),
+                    fingertip(1, 100f, 100f, 10L),
+                    fingertip(3, 300f, 100f, 10L),
+                ), added = 3))
+            // Stationary long enough to become RESTING.
+            e.process(TestTouchFactory.frame(
+                InputAction.MOVE, 400L,
+                listOf(
+                    TestTouchFactory.palm(2, timeMs = 0L),
+                    fingertip(1, 100f, 100f, 10L),
+                    fingertip(3, 300f, 100f, 10L),
+                )))
+            // A few frames of either stillness or slow drift (11px/10ms = 110mm/s, still
+            // below the 120mm/s gate so the fingers stay RESTING while producing noise).
+            for (t in 1..3) {
+                val tMs = 400L + t * 10L
+                e.process(TestTouchFactory.frame(
+                    InputAction.MOVE, tMs,
+                    listOf(
+                        TestTouchFactory.palm(2, timeMs = 0L),
+                        fingertip(1, 100f + finger1x * t, 100f, 10L),
+                        fingertip(3, 300f + finger3x * t, 100f, 10L),
+                    )))
+            }
+        }
+
+        // Control: resting fingers perfectly still -> noise stays ~0 -> the 160mm/s mover
+        // is promoted.
+        val control = engine()
+        restingFrames(control, 0f, 0f)
+        control.process(TestTouchFactory.frame(
+            InputAction.POINTER_DOWN, 440L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 100f, 100f, 10L),
+                fingertip(3, 300f, 100f, 10L),
+                writer(0, 900f, 500f, 440L),
+            ), added = 0))
+        for (t in 1..3) {
+            val tMs = 440L + t * 10L
+            control.process(TestTouchFactory.frame(
+                InputAction.MOVE, tMs,
+                listOf(
+                    TestTouchFactory.palm(2, timeMs = 0L),
+                    fingertip(1, 100f, 100f, 10L),
+                    fingertip(3, 300f, 100f, 10L),
+                    writer(0, 900f + 16f * t, 500f, 440L),
+                )))
+        }
+        val controlResult = control.process(TestTouchFactory.frame(
+            InputAction.MOVE, 470L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 100f, 100f, 10L),
+                fingertip(3, 300f, 100f, 10L),
+                writer(0, 948f, 500f, 440L),
+            )))
+        assertEquals(ContactClassification.WRITING, controlResult.contactFor(0)?.classification)
+        assertEquals(0, controlResult.activeWritingPointerId)
+
+        // Noisy: the resting fingers jitter at ~110mm/s. The adaptive noise estimate raises
+        // the effective stroke gate well above 160mm/s, so the SAME mover stays CANDIDATE.
+        val noisy = engine()
+        restingFrames(noisy, 11f, 11f)
+        noisy.process(TestTouchFactory.frame(
+            InputAction.POINTER_DOWN, 440L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 100f + 11f * 3f, 100f, 10L),
+                fingertip(3, 300f + 11f * 3f, 100f, 10L),
+                writer(0, 900f, 500f, 440L),
+            ), added = 0))
+        for (t in 1..3) {
+            val tMs = 440L + t * 10L
+            noisy.process(TestTouchFactory.frame(
+                InputAction.MOVE, tMs,
+                listOf(
+                    TestTouchFactory.palm(2, timeMs = 0L),
+                    fingertip(1, 100f + 11f * (3f + t), 100f, 10L),
+                    fingertip(3, 300f + 11f * (3f + t), 100f, 10L),
+                    writer(0, 900f + 16f * t, 500f, 440L),
+                )))
+        }
+        val noisyResult = noisy.process(TestTouchFactory.frame(
+            InputAction.MOVE, 470L,
+            listOf(
+                TestTouchFactory.palm(2, timeMs = 0L),
+                fingertip(1, 100f + 11f * 6f, 100f, 10L),
+                fingertip(3, 300f + 11f * 6f, 100f, 10L),
+                writer(0, 948f, 500f, 440L),
+            )))
+        assertTrue(
+            "adaptive noise should keep the 160mm/s mover from promoting",
+            (noisyResult.contactFor(0)?.windowedVelocityMmPerSec ?: 0f) > 120f,
+        )
+        assertEquals(ContactClassification.CANDIDATE, noisyResult.contactFor(0)?.classification)
+        assertNull(noisyResult.activeWritingPointerId)
+    }
 }

@@ -116,6 +116,28 @@ data class PalmRejectionSettings(
      *  initial size by at least this multiple (guards against a finger flattening briefly). */
     var palmGrowthFactor: Float = 2.2f,
     /**
+     * Windowed velocity threshold (mm/s) for stroke-like motion. The sliding window is
+     * [velocityWindowMs]. A contact must exceed this velocity to be considered a writer
+     * (movement gate). Adaptive: raised if the resting hand produces high-velocity noise.
+     */
+    var minPromoteVelocityMmPerSec: Float = 120f,
+    /**
+     * Sliding window duration (ms) for velocity & continuity analysis. Must be 80–180 ms
+     * per the palm rejection design. Default 120 ms.
+     */
+    var velocityWindowMs: Long = 120L,
+    /**
+     * Size threshold (mm) for growth cancellation of a locked writer. Defaults to
+     * palmSizeThresholdMm * 1.15 (27.6 mm). Kept separate so it can be tuned independently.
+     */
+    var sizeGrowthCancelThresholdMm: Float = 27.6f,
+    /**
+     * When on, an isolated small contact (no resting hand nearby) draws immediately
+     * without being buffered as a CANDIDATE. When off, even isolated contacts are
+     * observed until they move like a stroke. Default on for backward compatibility.
+     */
+    var allowImmediateDrawWhenIsolated: Boolean = true,
+    /**
      * When on, the canvas draws a live overlay of every contact with its classification
      * color, size circle and pointer id so resting-hand behavior can be verified on-device.
      */

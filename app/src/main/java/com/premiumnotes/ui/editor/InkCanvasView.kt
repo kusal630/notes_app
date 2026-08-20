@@ -1380,6 +1380,27 @@ class InkCanvasView @JvmOverloads constructor(
                 c.y + 4f,
                 debugLabelPaint,
             )
+            // Second line: windowed velocity, path length, write/rest scores, and the reason
+            // so velocity-gated resting behavior can be diagnosed on-device.
+            canvas.drawText(
+                "v=${"%.0f".format(cc.windowedVelocityMmPerSec)}mm/s " +
+                    "L=${"%.0f".format(cc.pathLengthMm)}mm " +
+                    "W=${"%.0f".format(cc.writeScore)} R=${"%.0f".format(cc.restScore)} " +
+                    cc.reason.name,
+                c.x + r + 4f,
+                c.y + 20f,
+                debugLabelPaint,
+            )
+        }
+        // Bounding boxes of resting clusters: visual confirmation that the whole hand (not
+        // just one finger) is being treated as resting.
+        val boundsPaint = Paint().apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+            color = 0xFF90A4AE.toInt()
+        }
+        for (bounds in frame.clusterBounds) {
+            canvas.drawRect(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, boundsPaint)
         }
     }
 }

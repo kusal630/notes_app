@@ -150,6 +150,10 @@ enum class ClassificationReason {
     PROMOTED_TO_WRITING,
     /** Resting-hand tracker: a drawing pointer's smoothed contact grew palm-sized. */
     PALM_GROWTH_CANCELLED,
+    /** Contact moved but velocity was below the stroke threshold (kept as RESTING). */
+    VELOCITY_GATE,
+    /** Contact moved slowly in a coherent cluster (hand-shift drift). */
+    HAND_SHIFT_DRIFT,
 }
 
 data class ClassificationResult(
@@ -170,10 +174,18 @@ data class ClassifiedContact(
     /** Screen position where this pointer first went down (for seeding a promoted stroke). */
     val downX: Float? = null,
     val downY: Float? = null,
+    /** Windowed velocity (mm/s) over the configured velocity window. */
+    val windowedVelocityMmPerSec: Float = 0f,
+    /** Total path length travelled since down (mm). */
+    val pathLengthMm: Float = 0f,
+    /** Write-score (0..1): how much this contact resembles a deliberate stroke. */
+    val writeScore: Float = 0f,
+    /** Rest-score (0..1): how much this contact resembles a resting hand. */
+    val restScore: Float = 0f,
 )
 
 /**
- * Per-pointer dynamic state the engine tracks between frames.
+ * A per-pointer dynamic state the engine tracks between frames.
  *
  * The resting-hand tracker extends this with motion and contact-size history so it can
  * distinguish a stationary resting finger from the moving writing finger using nothing
@@ -205,17 +217,43 @@ internal data class PointerMotionState(
     var restingClassification: ContactClassification = ContactClassification.WRITING,
     /** True on the first frame a pointer is seen (used by the candidate-buffering rule). */
     var isNew: Boolean = true,
+
+    // --- Velocity window & scoring (Task: velocity-aware resting-hand rejection) ---
+    /** Recent samples for sliding-window velocity & continuity analysis. */
+    val recentSamples: ArrayDeque<MotionSample> = ArrayDeque(),
+    /** Windowed velocity (mm/s) over the configured velocity window. */
+    var windowedVelocityMmPerSec: Float = 0f,
+    /** Number of moving samples within the window (continuity). */
+    var movingSampleCount: Int = 0,
+    /** Write-score (0..1): how much this contact resembles a deliberate stroke. */
+    var writeScore: Float = 0f,
+    /** Rest-score (0..1): how much this contact resembles a resting hand. */
+    var restScore: Float = 0f,
+)
+
+/** One sample in the velocity/continuity window. */
+data class MotionSample(
+    val timeNanos: Long,
+    val x: Float,
+    val y: Float,
+)
+
+/** Bounding box of a resting cluster (screen px). */
+data class ClusterBounds(
+    val minX: Float, val minY: Float, val maxX: Float, val maxY: Float,
 )
 
 /**
  * Result of running the palm rejection engine over one [InputFrame].
- * [gesturePointerIds] are the (at most two) contacts permitted to drive pan/zoom.
+ * [gesturePointerIds] are the (at most two) contacts permitted to pan/zoom.
  */
 data class ClassifiedFrame(
     val frame: InputFrame,
     val contacts: List<ClassifiedContact>,
     val activeWritingPointerId: Int?,
     val gesturePointerIds: List<Int>,
+    /** Bounding boxes of resting clusters (≥2 stationary close contacts), for debug overlay. */
+    val clusterBounds: List<ClusterBounds> = emptyList(),
 ) {
     fun contactFor(pointerId: Int): ClassifiedContact? =
         contacts.firstOrNull { it.contact.pointerId == pointerId }

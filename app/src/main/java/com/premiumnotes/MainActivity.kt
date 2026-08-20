@@ -171,6 +171,10 @@ fun SettingsScreen(
                         this.clusterStationaryThresholdMs = newSettings.clusterStationaryThresholdMs
                         this.palmGrowthCancelEnabled = newSettings.palmGrowthCancelEnabled
                         this.palmGrowthFactor = newSettings.palmGrowthFactor
+                        this.minPromoteVelocityMmPerSec = newSettings.minPromoteVelocityMmPerSec
+                        this.velocityWindowMs = newSettings.velocityWindowMs
+                        this.sizeGrowthCancelThresholdMm = newSettings.sizeGrowthCancelThresholdMm
+                        this.allowImmediateDrawWhenIsolated = newSettings.allowImmediateDrawWhenIsolated
                         this.debugOverlayEnabled = newSettings.debugOverlayEnabled
                     }
                 }
@@ -343,6 +347,85 @@ fun SettingsContent(
             Switch(
                 checked = settings.debugOverlayEnabled,
                 onCheckedChange = { onSettingChange(settings.copy(debugOverlayEnabled = it)) },
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            "Stroke velocity threshold: ${settings.minPromoteVelocityMmPerSec.toInt()} mm/s",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        androidx.compose.material3.Slider(
+            value = settings.minPromoteVelocityMmPerSec,
+            onValueChange = { v -> onSettingChange(settings.copy(minPromoteVelocityMmPerSec = v)) },
+            valueRange = 0f..400f,
+            steps = 39,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "A contact must move this fast (over a short sliding window) to be treated as a " +
+                "deliberate stroke. Anything slower is a resting finger or a hand shift.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            "Min stroke travel: ${"%.0f".format(settings.movementPromoteThresholdMm)} mm",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        androidx.compose.material3.Slider(
+            value = settings.movementPromoteThresholdMm,
+            onValueChange = { v -> onSettingChange(settings.copy(movementPromoteThresholdMm = v)) },
+            valueRange = 1f..10f,
+            steps = 17,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "A buffered contact must travel at least this far (combined with stroke velocity) " +
+                "before it is promoted to the writing pointer.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            "Palm-growth cancel size: ${"%.0f".format(settings.sizeGrowthCancelThresholdMm)} mm",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        androidx.compose.material3.Slider(
+            value = settings.sizeGrowthCancelThresholdMm,
+            onValueChange = { v -> onSettingChange(settings.copy(sizeGrowthCancelThresholdMm = v)) },
+            valueRange = 15f..50f,
+            steps = 34,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "A locked writing pointer whose smoothed contact size grows above this is cancelled " +
+                "as a palm (with growth hysteresis), stopping accidental palm strokes.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Draw immediately when isolated", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "When on, a lone small contact with no resting hand nearby draws right away. " +
+                        "When off, even isolated contacts are observed until they move like a stroke.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = settings.allowImmediateDrawWhenIsolated,
+                onCheckedChange = { onSettingChange(settings.copy(allowImmediateDrawWhenIsolated = it)) },
             )
         }
 

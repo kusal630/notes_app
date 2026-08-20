@@ -162,6 +162,7 @@ class PalmRejectionEngine(
             contacts = classified,
             activeWritingPointerId = finalWritingPointerId,
             gesturePointerIds = gestureIds,
+            clusterBounds = trackerResult.clusterBounds,
         )
     }
 
