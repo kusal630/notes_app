@@ -130,6 +130,14 @@ class EditorViewModel(
     fun setEraserSize(sizeMm: Float) = _editor.value?.setEraserSize(sizeMm)
     fun setShapeKind(kind: ShapeKind) = _editor.value?.setShapeKind(kind)
     fun addImage(image: com.vellum.notes.model.ImageObject) = _editor.value?.addImage(image)
+
+    fun addText(text: com.vellum.notes.model.TextObject) = _editor.value?.addText(text)
+    fun updateText(updated: com.vellum.notes.model.TextObject) = _editor.value?.updateText(updated)
+
+    /** Sets this page's paper template and persists it. */
+    fun setPageTemplate(templateId: String) {
+        viewModelScope.launch { repository.setPageTemplate(pageId, templateId) }
+    }
     fun setTranscript(segments: List<com.vellum.notes.model.TranscriptSegment>) =
         _editor.value?.setTranscript(segments)
     fun setSummary(summary: String?) = _editor.value?.setSummary(summary)

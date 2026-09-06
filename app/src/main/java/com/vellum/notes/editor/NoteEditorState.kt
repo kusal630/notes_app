@@ -114,9 +114,25 @@ class NoteEditorState(
         apply(AddShapeCommand(shape))
     }
 
-    /** Inserts an image object (undoable). Rendered between paper and ink. */
+    /** Inserts an image object (undoable). Rendered between paper and ink.
+     *  Pass [ImageObject.id] == 0 to mint a fresh unique id. */
     fun addImage(image: com.vellum.notes.model.ImageObject) {
-        apply(AddObjectsCommand(imageObjects = listOf(image)))
+        val prepared = if (image.id == 0L) image.copy(id = nextId()) else image
+        apply(AddObjectsCommand(imageObjects = listOf(prepared)))
+    }
+
+    /** Inserts a text object (undoable). Rendered between images and ink.
+     *  Pass [TextObject.id] == 0 to mint a fresh unique id. */
+    fun addText(text: com.vellum.notes.model.TextObject) {
+        val prepared = if (text.id == 0L) text.copy(id = nextId()) else text
+        apply(AddObjectsCommand(textObjects = listOf(prepared)))
+    }
+
+    /** Replaces a text object's content (undoable). */
+    fun updateText(updated: com.vellum.notes.model.TextObject) {
+        val current = _content.value.textObjects.firstOrNull { it.id == updated.id } ?: return
+        apply(RemoveObjectsCommand(textObjects = listOf(current)))
+        apply(AddObjectsCommand(textObjects = listOf(updated)))
     }
 
     /** Moves an image by delta (undoable, coalesced during drags). */

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Menu
@@ -47,6 +48,8 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Summarize
 import androidx.compose.material.icons.outlined.Circle
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -110,6 +113,12 @@ import com.vellum.notes.data.SettingsRepository
 import com.vellum.notes.editor.NoteEditorState
 import com.vellum.notes.editor.Tool
 import com.vellum.notes.export.PdfExporter
+import java.io.File
+import androidx.activity.result.PickVisualMediaRequest
+import android.graphics.BitmapFactory
+import com.vellum.notes.data.ImageStore
+import com.vellum.notes.model.PaperTemplates
+import com.vellum.notes.pdf.PdfImporter
 import com.vellum.notes.input.InputCapabilities
 import com.vellum.notes.input.PalmRejectionEngine
 import com.vellum.notes.input.PalmRejectionMode
@@ -301,8 +310,137 @@ fun EditorScreen(
         }
     }
 
-    val pageBackground = remember(pageId) {
-        pageList.firstOrNull { it.id == pageId }?.background ?: PageBackground()
+    // ---- Wave-1 UI state: templates, text boxes, images ----
+    var showTemplateDialog by remember { mutableStateOf(false) }
+    var showTextDialog by remember { mutableStateOf(false) }
+
+    val currentSummary = pageList.firstOrNull { it.id == pageId }
+    val pageBackground = remember(pageId, currentSummary?.templateId, currentSummary?.background) {
+        PaperTemplates.backgroundFor(currentSummary?.templateId).let { themed ->
+            if (currentSummary?.background != PageBackground()) currentSummary?.background ?: themed else themed
+        }
+    }
+
+    // Rasterized PDF page underlay for PDF-backed pages.
+    val pdfPageBitmap = remember(pageId, currentSummary?.pdfBackgroundPath) {
+        val path = currentSummary?.pdfBackgroundPath.orEmpty()
+        if (path.isBlank()) null
+        else runCatching {
+            BitmapFactory.decodeFile(File(uiContext.filesDir, PdfImporter.DIR).resolve(path).absolutePath)
+        }.getOrNull()
+    }
+
+    // Decoded image bitmaps for canvas rendering, keyed by fileRef.
+    val imageBitmapCache = remember(content.imageObjects.map { it.fileRef }) {
+        content.imageObjects.associate { im ->
+            im.fileRef to runCatching {
+                BitmapFactory.decodeFile(File(uiContext.filesDir, im.fileRef).absolutePath)
+            }.getOrNull()
+        }.filterValues { it != null } as Map<String, android.graphics.Bitmap>
+    }
+
+    // Photo picker for image insertion.
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val fileRef = ImageStore.importUri(uiContext, uri)
+        if (fileRef == null) {
+            android.widget.Toast.makeText(uiContext, "Could not import image", android.widget.Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+        val bmp = BitmapFactory.decodeFile(File(uiContext.filesDir, fileRef).absolutePath)
+        // Place at a sensible default: 60mm wide, centered in the current viewport.
+        val aspect = if (bmp != null && bmp.height > 0) bmp.height.toFloat() / bmp.width else 0.75f
+        val wMm = 60f
+        val hMm = (wMm * aspect).coerceAtMost(160f)
+        // Default placement: upper-center of the A4-width world (210mm wide).
+        vm.addImage(
+            com.vellum.notes.model.ImageObject(
+                id = 0L,
+                x = 105f - wMm / 2f,
+                y = 80f - hMm / 2f,
+                width = wMm,
+                height = hMm,
+                fileRef = fileRef,
+            ),
+        )
+    }
+
+    // ---- Page template picker ----
+    if (showTemplateDialog) {
+        AlertDialog(
+            onDismissRequest = { showTemplateDialog = false },
+            title = { Text("Page template") },
+            text = {
+                Column {
+                    PaperTemplates.ALL.forEach { t ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    vm.setPageTemplate(t.id)
+                                    showTemplateDialog = false
+                                }
+                                .padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.GridOn,
+                                contentDescription = null,
+                                tint = if (currentSummary?.templateId == t.id) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(t.label, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTemplateDialog = false }) { Text("Done") }
+            },
+        )
+    }
+
+    // ---- Insert text box ----
+    if (showTextDialog) {
+        var textValue by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showTextDialog = false },
+            title = { Text("Insert text") },
+            text = {
+                OutlinedTextField(
+                    value = textValue,
+                    onValueChange = { textValue = it },
+                    label = { Text("Text") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (textValue.isNotBlank()) {
+                        val wMm = 90f
+                        val fontSize = 8f
+                        vm.addText(
+                            com.vellum.notes.model.TextObject(
+                                id = 0L,
+                                x = 105f - wMm / 2f,
+                                y = 60f,
+                                width = wMm,
+                                height = fontSize * 1.35f * (textValue.lines().size + 2),
+                                text = textValue,
+                            ),
+                        )
+                    }
+                    showTextDialog = false
+                }) { Text("Insert") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTextDialog = false }) { Text("Cancel") }
+            },
+        )
     }
 
     Scaffold(
@@ -397,6 +535,11 @@ fun EditorScreen(
                         }
                     }
                 },
+                onInsertText = { showTextDialog = true },
+                onInsertImage = {
+                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onPickTemplate = { showTemplateDialog = true },
             )
         }
     ) { padding ->
@@ -456,6 +599,10 @@ fun EditorScreen(
                                 view.eraserSizeMm = eraserSize
                                 view.shapeKind = shapeKind
                                 view.background = pageBackground
+                                view.images = content.imageObjects
+                                view.texts = content.textObjects
+                                view.imageBitmaps = imageBitmapCache
+                                view.pdfBackground = pdfPageBitmap
                                 view.selectionBoundsMm = editorState!!.selectionBoundsMm
                                 view.listener = vm.canvasListener
                                 view.autoEraseEnabled = settings.autoEraseEnabled
@@ -1023,6 +1170,9 @@ private fun EditorToolbar(
     onSmoothingChange: (SmoothingMode) -> Unit,
     autoEraseEnabled: Boolean,
     onAutoEraseToggle: () -> Unit,
+    onInsertText: () -> Unit = {},
+    onInsertImage: () -> Unit = {},
+    onPickTemplate: () -> Unit = {},
 ) {
     Surface(tonalElevation = 4.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -1061,6 +1211,24 @@ private fun EditorToolbar(
                     selected = tool == Tool.SHAPES,
                     onClick = { onTool(Tool.SHAPES) },
                     content = { Icon(Icons.Filled.Category, contentDescription = "Shapes") },
+                )
+                ToolButton(
+                    label = "Text",
+                    selected = tool == Tool.TEXT,
+                    onClick = onInsertText,
+                    content = { Icon(Icons.Filled.TextFields, contentDescription = "Text box") },
+                )
+                ToolButton(
+                    label = "Image",
+                    selected = false,
+                    onClick = onInsertImage,
+                    content = { Icon(Icons.Filled.Image, contentDescription = "Insert image") },
+                )
+                ToolButton(
+                    label = "Template",
+                    selected = false,
+                    onClick = onPickTemplate,
+                    content = { Icon(Icons.Filled.GridOn, contentDescription = "Page template") },
                 )
 
                 Spacer(Modifier.width(8.dp))

@@ -110,6 +110,9 @@ class InkCanvasView @JvmOverloads constructor(
 
     /** Image objects on the current page (rendered between paper and ink, in z-order). */
     var images: List<com.vellum.notes.model.ImageObject> = emptyList()
+
+    /** Committed text objects, drawn between images and ink. */
+    var texts: List<com.vellum.notes.model.TextObject> = emptyList()
         set(value) {
             field = value
             invalidate()
@@ -1279,6 +1282,39 @@ class InkCanvasView @JvmOverloads constructor(
                 android.graphics.RectF(im.x, im.y, im.x + im.width, im.y + im.height),
                 null,
             )
+        }
+        // Text objects: world-space boxes drawn between images and ink so ink and
+        // highlights stay on top, matching the documented z-order.
+        for (t in texts) {
+            if (t.text.isBlank()) continue
+            val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = t.colorArgb.toInt()
+                textSize = t.fontSizeMm
+                typeface = if (t.bold) android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.BOLD)
+                           else android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.NORMAL)
+                isSubpixelText = true
+            }
+            canvas.save()
+            canvas.rotate(t.rotation, t.x, t.y)
+            // Simple word-wrap into the box width; lines flow downward from the top edge.
+            val maxW = t.width.coerceAtLeast(1f)
+            val lines = ArrayList<String>()
+            for (raw in t.text.split('\n')) {
+                var line = ""
+                for (word in raw.split(' ')) {
+                    val candidate = if (line.isEmpty()) word else "$line $word"
+                    if (textPaint.measureText(candidate) > maxW && line.isNotEmpty()) {
+                        lines += line; line = word
+                    } else line = candidate
+                }
+                lines += line
+            }
+            var y = t.y + t.fontSizeMm
+            for (line in lines) {
+                canvas.drawText(line, t.x, y, textPaint)
+                y += t.fontSizeMm * 1.35f
+            }
+            canvas.restore()
         }
         for (item in displayStrokes) {
             if (item.type == com.vellum.notes.model.PenType.HIGHLIGHTER) drawCommittedStroke(canvas, item)

@@ -22,9 +22,31 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import android.provider.OpenableColumns
+import android.widget.Toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.net.Uri
+import com.vellum.notes.model.NotebookCovers
+import com.vellum.notes.model.PaperTemplates
+import com.vellum.notes.pdf.PdfImporter
+import com.vellum.notes.data.ImageStore
+import java.io.File
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Card
@@ -68,6 +90,41 @@ fun HomeScreen(
 ) {
     val notebooks by repository.notebooks.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var coverEditing by remember { mutableStateOf<Notebook?>(null) }
+    var pdfImporting by remember { mutableStateOf(false) }
+
+    // Offline PDF import: pick a file, rasterize every page into app-private
+    // storage, and build a PDF-backed notebook whose pages carry the raster
+    // underlay beneath the ink.
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        pdfImporting = true
+        scope.launch {
+            try {
+                val name = queryDisplayName(context, uri) ?: "Imported PDF"
+                val notebookId = repository.createNotebook(name, NoteType.NORMAL)
+                val files = withContext(Dispatchers.IO) {
+                    PdfImporter.rasterize(context, uri, notebookId)
+                }
+                if (files.isEmpty()) {
+                    repository.deleteNotebook(notebookId)
+                    Toast.makeText(context, "Could not read PDF", Toast.LENGTH_SHORT).show()
+                } else {
+                    files.forEachIndexed { index, f ->
+                        val pageId = repository.createPage(notebookId, title = "Page ${index + 1}")
+                        repository.setPagePdfBackground(pageId, index, f.name)
+                    }
+                }
+            } catch (t: Throwable) {
+                Toast.makeText(context, "PDF import failed: ${t.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                pdfImporting = false
+            }
+        }
+    }
 
     var showNewDialog by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Notebook?>(null) }
@@ -90,8 +147,16 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showNewDialog = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "New note")
+            Column(horizontalAlignment = Alignment.End) {
+                ExtendedFloatingActionButton(
+                    onClick = { pdfPicker.launch(arrayOf("application/pdf")) },
+                    icon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null) },
+                    text = { Text(if (pdfImporting) "Importing…" else "Import PDF") },
+                )
+                Spacer(Modifier.height(12.dp))
+                FloatingActionButton(onClick = { showNewDialog = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "New note")
+                }
             }
         }
     ) { padding ->
@@ -146,7 +211,8 @@ fun HomeScreen(
                             },
                             onArchive = {
                                 scope.launch { repository.setArchived(nb.id, true) }
-                            }
+                            },
+                            onChangeCover = { coverEditing = nb }
                         )
                     }
                 }
@@ -157,15 +223,26 @@ fun HomeScreen(
     if (showNewDialog) {
         NewNoteDialog(
             onDismiss = { showNewDialog = false },
-            onConfirm = { name, type ->
+            onConfirm = { name, type, coverId, templateId ->
                 scope.launch {
-                    val id = repository.createNotebook(name, type)
+                    val id = repository.createNotebook(name, type, coverId = coverId, defaultTemplate = templateId)
                     // A new classroom note opens straight into the canvas with the audio
                     // sidebar ready to record; a normal note stays on the home screen.
                     if (type == NoteType.CLASSROOM) onOpenNotebook(id)
                 }
                 showNewDialog = false
             }
+        )
+    }
+
+    coverEditing?.let { nb ->
+        CoverPickerDialog(
+            currentCoverId = nb.coverId,
+            onDismiss = { coverEditing = null },
+            onPick = { coverId ->
+                scope.launch { repository.setNotebookCover(nb.id, coverId) }
+                coverEditing = null
+            },
         )
     }
 
@@ -189,13 +266,27 @@ private fun NotebookCard(
     onDelete: () -> Unit,
     onToggleFavorite: () -> Unit,
     onArchive: () -> Unit,
+    onChangeCover: () -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val cover = NotebookCovers.byId(notebook.coverId)
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
     ) {
+        // Premium cover banner: gradient (or pattern) from the cover library.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(cover.primaryArgb), Color(cover.secondaryArgb)),
+                    ),
+                    RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                ),
+        )
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -217,6 +308,7 @@ private fun NotebookCard(
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onEdit() })
+                        DropdownMenuItem(text = { Text("Change cover") }, onClick = { menuOpen = false; onChangeCover() })
                         DropdownMenuItem(text = { Text("Archive") }, onClick = { menuOpen = false; onArchive() })
                         DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete() })
                     }
@@ -246,12 +338,65 @@ private fun NotebookCard(
 }
 
 @Composable
+private fun CoverPickerDialog(
+    currentCoverId: String,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Cover") },
+        text = {
+            Column {
+                NotebookCovers.ALL.chunked(4).forEach { rowCovers ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        rowCovers.forEach { cover ->
+                            val selected = cover.id == currentCoverId
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(Color(cover.primaryArgb), Color(cover.secondaryArgb)),
+                                        ),
+                                        RoundedCornerShape(14.dp),
+                                    )
+                                    .then(
+                                        if (selected) Modifier.border(
+                                            2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp),
+                                        ) else Modifier
+                                    )
+                                    .clickable { onPick(cover.id) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+/** Display name of a SAF document, or null. */
+private fun queryDisplayName(context: android.content.Context, uri: Uri): String? {
+    return runCatching {
+        context.contentResolver.query(uri, null, null, null, null)?.use { c ->
+            val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
+        }
+    }.getOrNull()
+}
+
+@Composable
 private fun NewNoteDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, type: NoteType) -> Unit,
+    onConfirm: (name: String, type: NoteType, coverId: String, templateId: String) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var type by remember { mutableStateOf(NoteType.NORMAL) }
+    var coverId by remember { mutableStateOf("TEAL") }
+    var templateId by remember { mutableStateOf("RULED") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("New note") },
@@ -268,6 +413,42 @@ private fun NewNoteDialog(
                         ) { Text(if (t == NoteType.CLASSROOM) "Classroom" else "Normal") }
                     }
                 }
+                Spacer(Modifier.height(12.dp))
+                Text("Cover", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NotebookCovers.ALL.forEach { cover ->
+                        val selected = cover.id == coverId
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color(cover.primaryArgb), Color(cover.secondaryArgb)),
+                                    ),
+                                    RoundedCornerShape(10.dp),
+                                )
+                                .then(
+                                    if (selected) Modifier.border(
+                                        2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp),
+                                    ) else Modifier
+                                )
+                                .clickable { coverId = cover.id },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Paper", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(6.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    PaperTemplates.ALL.forEachIndexed { index, t ->
+                        SegmentedButton(
+                            selected = templateId == t.id,
+                            onClick = { templateId = t.id },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = PaperTemplates.ALL.size),
+                        ) { Text(t.label, style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
                     if (type == NoteType.CLASSROOM)
@@ -280,7 +461,7 @@ private fun NewNoteDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name, type) }) { Text("Create") }
+            TextButton(onClick = { onConfirm(name, type, coverId, templateId) }) { Text("Create") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

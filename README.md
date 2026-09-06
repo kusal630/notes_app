@@ -13,6 +13,11 @@ leaves ink — no proprietary or cloud palm-rejection service required.
 - Software palm rejection for passive styluses and fingers
 - Pen, highlighter, eraser, and selection tools
 - Shapes: draw them, then select, move, or resize a shape with the content inside it
+- Paper templates: blank, ruled, grid, dotted, and graph pages (per-notebook default + per-page override)
+- Notebook covers: eight premium gradient/pattern covers rendered on home-screen cards
+- PDF import & annotation: import any PDF offline; every page becomes a writable page with ink on top
+- Image insertion: place, move, and scale pictures in your notes
+- Text boxes: typed text blocks layered between images and ink
 - Classroom Notes: optional on-device recording that transcribes your lecture in
   real time (offline Vosk speech model, transcript saved with the note)
 - Multi-page notebooks with a page navigator
