@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PremiumNotes"
+rootProject.name = "Vellum"
 include(":app")

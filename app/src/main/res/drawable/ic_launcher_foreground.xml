@@ -5,35 +5,18 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Paper sheet -->
+    <!-- Vellum mark: a bold single tapered stroke forming a minimal "V",
+         centered in the adaptive-icon safe zone (66dp circle at 54,54).
+         Arms are wide at the top and taper to the apex. -->
     <path
-        android:fillColor="#F7F2E7"
-        android:pathData="M33,24 h30 c4.4,0 8,3.6 8,8 v8 h4 c4.4,0 8,3.6 8,8 v32 c0,4.4 -3.6,8 -8,8 h-38 c-4.4,0 -8,-3.6 -8,-8 v-50 c0,-4.4 3.6,-8 8,-8 z" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M35,32 L46,32 L54,58 L62,32 L73,32 L54,76 Z" />
 
-    <!-- Ruled lines on paper -->
+    <!-- Nib slit: a fine background-colored cut along the right arm. -->
     <path
         android:fillColor="#00000000"
-        android:strokeColor="#C9D4E5"
-        android:strokeWidth="1.6"
-        android:pathData="M39,38 h24 M39,45 h24 M39,52 h24 M39,59 h24 M39,66 h24 M39,73 h24" />
-
-    <!-- Pen nib -->
-    <path
-        android:fillColor="#2E5BFF"
-        android:pathData="M66,34 l12,12 l-3,3 l-12,-12 z" />
-
-    <!-- Nib slit -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.4"
-        android:pathData="M78,46 l-8,-8" />
-
-    <!-- Ink stroke -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#2E5BFF"
-        android:strokeWidth="3.4"
+        android:strokeColor="#171B24"
+        android:strokeWidth="2.4"
         android:strokeLineCap="round"
-        android:pathData="M42,76 c6,4 10,0 16,2 c6,2 9,-2 14,1" />
+        android:pathData="M67,37 L57,66" />
 </vector>

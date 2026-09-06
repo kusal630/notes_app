@@ -106,7 +106,7 @@ replaced (e.g. `HandwritingRecognitionService`).
 ## Package Layout
 
 ```
-com.premiumnotes
+com.vellum.notes
 ├── data/          Room, entities, DAOs, repository, serialization
 ├── input/         MotionEventParser, PalmRejectionEngine, classifier, WritingLock,
 │                  settings, smoothing

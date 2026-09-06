@@ -49,10 +49,10 @@ WebSite:
 SourceCode: https://github.com/YOUR-USER/premium-notes
 IssueTracker: https://github.com/YOUR-USER/premium-notes/issues
 
-AutoName: Premium Notes
+AutoName: Vellum
 Summary: Offline handwriting notes with palm rejection
 Description: |
-  Premium Notes is a private, fully offline handwriting notes application.
+  Vellum is a private, fully offline handwriting notes application.
   A built-in software palm-rejection pipeline analyzes raw touch input to
   reliably ignore palm rests so only your pen or writing finger leaves ink.
 

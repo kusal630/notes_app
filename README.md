@@ -1,4 +1,4 @@
-# Premium Notes
+# Vellum
 
 A private, fully offline handwriting notes application for Android with a
 software palm-rejection pipeline at its core.
@@ -78,7 +78,7 @@ the app then disables Classroom Notes with an explanatory message.
 
 Copyright (C) 2026 codeRed
 
-Premium Notes is free software: you can redistribute it and/or modify it under
+Vellum is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
 Foundation, either version 3 of the License, or (at your option) any later
 version.

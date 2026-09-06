@@ -11,11 +11,11 @@ import java.net.URI
 import java.util.zip.ZipFile
 
 android {
-    namespace = "com.premiumnotes"
+    namespace = "com.vellum.notes"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.premiumnotes"
+        applicationId = "com.vellum.notes"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

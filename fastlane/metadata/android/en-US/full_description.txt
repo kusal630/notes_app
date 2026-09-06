@@ -1,4 +1,4 @@
-Premium Notes is a private, fully offline handwriting notes application.
+Vellum is a private, fully offline handwriting notes application.
 
 Write naturally with a stylus or your finger. A built-in software palm-rejection
 pipeline analyzes raw touch input to reliably ignore palm rests so only your pen
@@ -24,5 +24,5 @@ Privacy
 - No permissions requested by default. Classroom Notes asks for the microphone only
   when you start a recording; the app works fully without granting it.
 
-Premium Notes is free software, released under the GNU General Public License
+Vellum is free software, released under the GNU General Public License
 v3 (or later).
