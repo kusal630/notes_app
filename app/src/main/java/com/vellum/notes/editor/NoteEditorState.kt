@@ -59,9 +59,13 @@ class NoteEditorState(
     private var selectionAnchor: Point? = null
     private var selectionOriginalsStrokes: List<Stroke>? = null
     private var selectionOriginalsShapes: List<ShapeObject>? = null
+    private var selectionOriginalsImages: List<com.vellum.notes.model.ImageObject>? = null
+    private var selectionOriginalsTexts: List<com.vellum.notes.model.TextObject>? = null
     private var resizeHandleIndex = -1
     private var resizeOriginalsStrokes: List<Stroke>? = null
     private var resizeOriginalsShapes: List<ShapeObject>? = null
+    private var resizeOriginalsImages: List<com.vellum.notes.model.ImageObject>? = null
+    private var resizeOriginalsTexts: List<com.vellum.notes.model.TextObject>? = null
 
     // Erase-gesture bookkeeping: objects removed during one press-to-lift coalesce into
     // a single undo entry so undoing an erase restores everything at once.
@@ -108,6 +112,23 @@ class NoteEditorState(
     /** Adds a placed geometric shape (undoable). */
     fun addShape(shape: ShapeObject) {
         apply(AddShapeCommand(shape))
+    }
+
+    /** Inserts an image object (undoable). Rendered between paper and ink. */
+    fun addImage(image: com.vellum.notes.model.ImageObject) {
+        apply(AddObjectsCommand(imageObjects = listOf(image)))
+    }
+
+    /** Moves an image by delta (undoable, coalesced during drags). */
+    fun moveImageBy(id: Long, dx: Float, dy: Float) {
+        val current = _content.value.imageObjects.firstOrNull { it.id == id } ?: return
+        val moved = current.copy(x = current.x + dx, y = current.y + dy)
+        applyCoalescing(
+            TransformSelectionCommand(
+                emptyList(), emptyList(), emptyList(), emptyList(),
+                listOf(current), listOf(moved),
+            )
+        )
     }
 
     /**
@@ -182,6 +203,26 @@ class NoteEditorState(
                     rect.union(right, bottom)
                 }
             }
+            for (im in _content.value.imageObjects) {
+                if (im.id !in ids) continue
+                if (!set) {
+                    rect.set(im.x, im.y, im.x + im.width, im.y + im.height)
+                    set = true
+                } else {
+                    rect.union(im.x, im.y)
+                    rect.union(im.x + im.width, im.y + im.height)
+                }
+            }
+            for (t in _content.value.textObjects) {
+                if (t.id !in ids) continue
+                if (!set) {
+                    rect.set(t.x, t.y, t.x + t.width, t.y + t.height)
+                    set = true
+                } else {
+                    rect.union(t.x, t.y)
+                    rect.union(t.x + t.width, t.y + t.height)
+                }
+            }
             if (!set) return null
             val pad = 2f
             return RectF(rect.left - pad, rect.top - pad, rect.right + pad, rect.bottom + pad)
@@ -189,6 +230,8 @@ class NoteEditorState(
 
     /** Selects a single object at [x],[y] (shapes and ink strokes, topmost first). */
     fun selectAt(x: Float, y: Float) {
+        val images = _content.value.imageObjects.filter { imageContains(it, x, y, 1f) }
+        val texts = _content.value.textObjects.filter { textContains(it, x, y, 1f) }
         val shapes = _content.value.shapeObjects.filter { shapeIntersects(it, x, y, 4f) }
         val highlighters = _content.value.strokes.filter {
             it.style.type == PenType.HIGHLIGHTER && strokeIntersects(it, x, y, 3f)
@@ -197,10 +240,13 @@ class NoteEditorState(
             it.style.type != PenType.HIGHLIGHTER && strokeIntersects(it, x, y, 3f)
         }
         // Topmost-first z-order on the canvas (matches onDraw):
-        // highlighters < shapes < ink, so ink wins, then shapes, then highlighters.
+        // paper < pdf/images < highlighters < shapes < ink, so an image tap wins over
+        // the paper but ink/shapes above it win over the image.
         val topId = when {
             ink.isNotEmpty() -> ink.last().id
             shapes.isNotEmpty() -> shapes.last().id
+            images.isNotEmpty() -> images.last().id
+            texts.isNotEmpty() -> texts.last().id
             highlighters.isNotEmpty() -> highlighters.last().id
             else -> null
         }
@@ -263,12 +309,24 @@ class NoteEditorState(
         val ids = HashSet<Long>()
         for (s in _content.value.strokes) if (strokeIntersectsRect(s, rect)) ids += s.id
         for (sh in _content.value.shapeObjects) if (shapeIntersectsRect(sh, rect)) ids += sh.id
+        for (im in _content.value.imageObjects) {
+            if (im.x <= rect.right && im.x + im.width >= rect.left &&
+                im.y <= rect.bottom && im.y + im.height >= rect.top
+            ) ids += im.id
+        }
+        for (t in _content.value.textObjects) {
+            if (t.x <= rect.right && t.x + t.width >= rect.left &&
+                t.y <= rect.bottom && t.y + t.height >= rect.top
+            ) ids += t.id
+        }
         _selectedIds.value = ids
     }
 
     fun selectAll() {
         val ids = _content.value.strokes.mapTo(HashSet()) { it.id }
         _content.value.shapeObjects.forEach { ids += it.id }
+        _content.value.imageObjects.forEach { ids += it.id }
+        _content.value.textObjects.forEach { ids += it.id }
         _selectedIds.value = ids
     }
 
@@ -277,33 +335,45 @@ class NoteEditorState(
         selectionAnchor = null
         selectionOriginalsStrokes = null
         selectionOriginalsShapes = null
+        selectionOriginalsImages = null
+        selectionOriginalsTexts = null
         resizeHandleIndex = -1
         resizeOriginalsStrokes = null
         resizeOriginalsShapes = null
+        resizeOriginalsImages = null
+        resizeOriginalsTexts = null
     }
 
     fun deleteSelection() {
         val strokes = _content.value.strokes.filter { it.id in _selectedIds.value }
         val shapes = _content.value.shapeObjects.filter { it.id in _selectedIds.value }
-        if (strokes.isEmpty() && shapes.isEmpty()) return
-        apply(RemoveObjectsCommand(strokes = strokes, shapes = shapes))
+        val images = _content.value.imageObjects.filter { it.id in _selectedIds.value }
+        val texts = _content.value.textObjects.filter { it.id in _selectedIds.value }
+        if (strokes.isEmpty() && shapes.isEmpty() && images.isEmpty() && texts.isEmpty()) return
+        apply(RemoveObjectsCommand(strokes = strokes, shapes = shapes, textObjects = texts, imageObjects = images))
         clearSelection()
     }
 
     fun duplicateSelection() {
         val strokes = _content.value.strokes.filter { it.id in _selectedIds.value }
         val shapes = _content.value.shapeObjects.filter { it.id in _selectedIds.value }
-        if (strokes.isEmpty() && shapes.isEmpty()) return
+        val images = _content.value.imageObjects.filter { it.id in _selectedIds.value }
+        val texts = _content.value.textObjects.filter { it.id in _selectedIds.value }
+        if (strokes.isEmpty() && shapes.isEmpty() && images.isEmpty() && texts.isEmpty()) return
         val strokeCopies = strokes.map {
             it.copy(id = nextId(), pointsPacked = it.pointsPacked.copyOf())
         }
         val shapeCopies = shapes.map {
             it.copy(id = nextId(), points = it.points.map { p -> p })
         }
-        apply(AddObjectsCommand(strokes = strokeCopies, shapes = shapeCopies))
+        val imageCopies = images.map { it.copy(id = nextId()) }
+        val textCopies = texts.map { it.copy(id = nextId()) }
+        apply(AddObjectsCommand(strokes = strokeCopies, shapes = shapeCopies, textObjects = textCopies, imageObjects = imageCopies))
         val copyIds = HashSet<Long>()
         strokeCopies.forEach { copyIds += it.id }
         shapeCopies.forEach { copyIds += it.id }
+        imageCopies.forEach { copyIds += it.id }
+        textCopies.forEach { copyIds += it.id }
         _selectedIds.value = copyIds
     }
 
@@ -311,19 +381,30 @@ class NoteEditorState(
         selectionAnchor = Point(anchorWorldX, anchorWorldY)
         selectionOriginalsStrokes = _content.value.strokes.filter { it.id in _selectedIds.value }
         selectionOriginalsShapes = _content.value.shapeObjects.filter { it.id in _selectedIds.value }
+        selectionOriginalsImages = _content.value.imageObjects.filter { it.id in _selectedIds.value }
+        selectionOriginalsTexts = _content.value.textObjects.filter { it.id in _selectedIds.value }
     }
 
     fun moveSelectionTo(worldX: Float, worldY: Float) {
         val originalsStrokes = selectionOriginalsStrokes ?: return
         val originalsShapes = selectionOriginalsShapes ?: return
+        val originalsImages = selectionOriginalsImages ?: emptyList()
+        val originalsTexts = selectionOriginalsTexts ?: emptyList()
         val anchor = selectionAnchor ?: return
-        if (originalsStrokes.isEmpty() && originalsShapes.isEmpty()) return
+        if (originalsStrokes.isEmpty() && originalsShapes.isEmpty() &&
+            originalsImages.isEmpty() && originalsTexts.isEmpty()
+        ) return
         val dx = worldX - anchor.x
         val dy = worldY - anchor.y
         val movedStrokes = originalsStrokes.map { translateStroke(it, dx, dy) }
         val movedShapes = originalsShapes.map { translateShape(it, dx, dy) }
+        val movedImages = originalsImages.map { it.copy(x = it.x + dx, y = it.y + dy) }
+        val movedTexts = originalsTexts.map { it.copy(x = it.x + dx, y = it.y + dy) }
         applyCoalescing(
-            TransformSelectionCommand(originalsStrokes, movedStrokes, originalsShapes, movedShapes)
+            TransformSelectionCommand(
+                originalsStrokes, movedStrokes, originalsShapes, movedShapes,
+                originalsImages, movedImages, originalsTexts, movedTexts,
+            )
         )
     }
 
@@ -331,6 +412,8 @@ class NoteEditorState(
         selectionAnchor = null
         selectionOriginalsStrokes = null
         selectionOriginalsShapes = null
+        selectionOriginalsImages = null
+        selectionOriginalsTexts = null
     }
 
     // --- shape resize -------------------------------------------------------
@@ -344,6 +427,8 @@ class NoteEditorState(
         resizeHandleIndex = handleIndex
         resizeOriginalsStrokes = _content.value.strokes.filter { it.id in _selectedIds.value }
         resizeOriginalsShapes = _content.value.shapeObjects.filter { it.id in _selectedIds.value }
+        resizeOriginalsImages = _content.value.imageObjects.filter { it.id in _selectedIds.value }
+        resizeOriginalsTexts = _content.value.textObjects.filter { it.id in _selectedIds.value }
     }
 
     /**
@@ -354,7 +439,11 @@ class NoteEditorState(
     fun resizeSelectionTo(worldX: Float, worldY: Float) {
         val originalsStrokes = resizeOriginalsStrokes ?: return
         val originalsShapes = resizeOriginalsShapes ?: return
-        if (originalsStrokes.isEmpty() && originalsShapes.isEmpty()) return
+        val originalsImages = resizeOriginalsImages ?: emptyList()
+        val originalsTexts = resizeOriginalsTexts ?: emptyList()
+        if (originalsStrokes.isEmpty() && originalsShapes.isEmpty() &&
+            originalsImages.isEmpty() && originalsTexts.isEmpty()
+        ) return
         val bounds = selectionBoundsMm ?: return
         // The anchor is the corner/edge opposite the dragged handle; the old handle
         // position is the handle of the ORIGINAL bounds (scale relative to gesture start).
@@ -429,8 +518,13 @@ class NoteEditorState(
 
         val resizedStrokes = originalsStrokes.map { scaleStroke(it, anchor, sx, sy) }
         val resizedShapes = originalsShapes.map { scaleShape(it, anchor, sx, sy) }
+        val resizedImages = originalsImages.map { scaleImage(it, anchor, sx, sy) }
+        val resizedTexts = originalsTexts.map { scaleText(it, anchor, sx, sy) }
         applyCoalescing(
-            TransformSelectionCommand(originalsStrokes, resizedStrokes, originalsShapes, resizedShapes)
+            TransformSelectionCommand(
+                originalsStrokes, resizedStrokes, originalsShapes, resizedShapes,
+                originalsImages, resizedImages, originalsTexts, resizedTexts,
+            )
         )
     }
 
@@ -438,6 +532,8 @@ class NoteEditorState(
         resizeHandleIndex = -1
         resizeOriginalsStrokes = null
         resizeOriginalsShapes = null
+        resizeOriginalsImages = null
+        resizeOriginalsTexts = null
     }
 
     private fun translateStroke(s: Stroke, dx: Float, dy: Float): Stroke {
@@ -478,6 +574,18 @@ class NoteEditorState(
             y = anchor.y + (s.y - anchor.y) * sy,
             points = s.points.map { Point(anchor.x + (it.x - anchor.x) * sx, anchor.y + (it.y - anchor.y) * sy) },
         )
+
+    private fun scaleImage(im: com.vellum.notes.model.ImageObject, anchor: Point, sx: Float, sy: Float): com.vellum.notes.model.ImageObject {
+        val nx = anchor.x + (im.x - anchor.x) * sx
+        val ny = anchor.y + (im.y - anchor.y) * sy
+        return im.copy(x = nx, y = ny, width = (im.width * sx).coerceAtLeast(1f), height = (im.height * sy).coerceAtLeast(1f))
+    }
+
+    private fun scaleText(t: com.vellum.notes.model.TextObject, anchor: Point, sx: Float, sy: Float): com.vellum.notes.model.TextObject {
+        val nx = anchor.x + (t.x - anchor.x) * sx
+        val ny = anchor.y + (t.y - anchor.y) * sy
+        return t.copy(x = nx, y = ny, width = (t.width * sx).coerceAtLeast(1f), height = (t.height * sy).coerceAtLeast(1f))
+    }
 
     fun undo() {
         val c = undoRedo.undoCommand() ?: return

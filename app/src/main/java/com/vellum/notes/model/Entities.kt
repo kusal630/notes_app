@@ -14,6 +14,8 @@ data class Notebook(
     val id: Long = 0L,
     val title: String,
     val type: NoteType = NoteType.NORMAL,
+    val coverId: String = "TEAL",
+    val defaultTemplate: String = "BLANK",
     val isFavorite: Boolean = false,
     val isArchived: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
@@ -28,5 +30,12 @@ data class PageSummary(
     val title: String = "Untitled Page",
     val order: Int = 0,
     val background: PageBackground = PageBackground(),
+    val templateId: String = "BLANK",
+    /** Source PDF page index, or -1 for a normal page. */
+    val pdfPageIndex: Int = -1,
+    /** Relative file name of the rasterized PDF page under `pdf-pages/`. */
+    val pdfBackgroundPath: String = "",
     val updatedAt: Long = System.currentTimeMillis(),
-)
+) {
+    val isPdfBacked: Boolean get() = pdfPageIndex >= 0
+}

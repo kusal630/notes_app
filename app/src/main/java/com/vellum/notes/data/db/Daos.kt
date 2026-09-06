@@ -33,6 +33,12 @@ interface NotebookDao {
     @Query("UPDATE notebooks SET isArchived = :archived, updatedAt = :now WHERE id = :id")
     suspend fun setArchived(id: Long, archived: Boolean, now: Long = System.currentTimeMillis())
 
+    @Query("UPDATE notebooks SET coverId = :coverId, updatedAt = :now WHERE id = :id")
+    suspend fun setCover(id: Long, coverId: String, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE notebooks SET defaultTemplate = :templateId, updatedAt = :now WHERE id = :id")
+    suspend fun setDefaultTemplate(id: Long, templateId: String, now: Long = System.currentTimeMillis())
+
     @Query("DELETE FROM notebooks WHERE id = :id")
     suspend fun delete(id: Long)
 
@@ -69,4 +75,10 @@ interface PageDao {
 
     @Query("UPDATE pages SET backgroundJson = :backgroundJson, updatedAt = :now WHERE id = :id")
     suspend fun saveBackground(id: Long, backgroundJson: String, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE pages SET templateId = :templateId, updatedAt = :now WHERE id = :id")
+    suspend fun saveTemplate(id: Long, templateId: String, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE pages SET pdfPageIndex = :pdfPageIndex, pdfBackgroundPath = :pdfBackgroundPath, updatedAt = :now WHERE id = :id")
+    suspend fun savePdfBackground(id: Long, pdfPageIndex: Int, pdfBackgroundPath: String, now: Long = System.currentTimeMillis())
 }

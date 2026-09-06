@@ -1,8 +1,11 @@
 package com.vellum.notes.export
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Rect
 import android.graphics.pdf.PdfDocument
 import android.graphics.RectF
+import com.vellum.notes.model.ImageObject
 import com.vellum.notes.model.PageBackground
 import com.vellum.notes.model.PageContent
 import com.vellum.notes.model.PenType
@@ -29,12 +32,40 @@ object PdfExporter {
         pageId: Long,
         content: PageContent,
         background: PageBackground,
+    ): File? = export(context, pageId, content, background, null, null)
+
+    /**
+     * Full export: paper background (or rasterized PDF page beneath), then images
+     * (between paper and ink), then highlighters/shapes/ink on top. For PDF-backed
+     * notes [pdfBackground] is the original page and ink draws over it.
+     *
+     * [imageBitmaps] maps [ImageObject.fileRef] to a decoded bitmap; missing entries
+     * are skipped so export never fails on a deleted file.
+     */
+    fun export(
+        context: Context,
+        pageId: Long,
+        content: PageContent,
+        background: PageBackground,
+        pdfBackground: Bitmap?,
+        imageBitmaps: Map<String, Bitmap>?,
     ): File? {
         val bounds = contentBounds(content)
-        val widthMm = (bounds.width() + MARGIN_MM * 2f).coerceIn(160f, 600f)
-        val heightMm = (bounds.height() + MARGIN_MM * 2f).coerceIn(120f, 1400f)
-        val left = bounds.left - MARGIN_MM
-        val top = bounds.top - MARGIN_MM
+        val widthMm: Float
+        val heightMm: Float
+        val left: Float
+        val top: Float
+        if (pdfBackground != null) {
+            widthMm = 210f
+            heightMm = 210f * pdfBackground.height / pdfBackground.width.toFloat()
+            left = 0f
+            top = 0f
+        } else {
+            widthMm = (bounds.width() + MARGIN_MM * 2f).coerceIn(160f, 600f)
+            heightMm = (bounds.height() + MARGIN_MM * 2f).coerceIn(120f, 1400f)
+            left = bounds.left - MARGIN_MM
+            top = bounds.top - MARGIN_MM
+        }
 
         val dir = context.filesDir.resolve("exports")
         dir.mkdirs()
@@ -64,6 +95,30 @@ object PdfExporter {
                     worldClip = RectF(left, top, left + widthMm, top + heightMm),
                 )
 
+                if (pdfBackground != null && !pdfBackground.isRecycled) {
+                    val dst = RectF(0f, 0f, widthMm, heightMm)
+                    canvas.drawBitmap(
+                        pdfBackground,
+                        Rect(0, 0, pdfBackground.width, pdfBackground.height),
+                        dst,
+                        null,
+                    )
+                }
+
+                // Z-order: paper/pdf < images < highlighters < shapes < ink.
+                if (imageBitmaps != null) {
+                    for (im in content.imageObjects.sortedBy { it.zOrder }) {
+                        val bmp = imageBitmaps[im.fileRef] ?: continue
+                        if (bmp.isRecycled) continue
+                        canvas.drawBitmap(
+                            bmp,
+                            Rect(0, 0, bmp.width, bmp.height),
+                            RectF(im.x, im.y, im.x + im.width, im.y + im.height),
+                            null,
+                        )
+                    }
+                }
+
                 // Z-order: highlighters below ink (same rule as the canvas).
                 val highlighters = ArrayList<Stroke>()
                 val ink = ArrayList<Stroke>()
@@ -90,9 +145,18 @@ object PdfExporter {
     }
 
     /** Bounding box of all page content in world mm; falls back to an A4-ish region. */
-    private fun contentBounds(content: PageContent): RectF {
+    fun contentBounds(content: PageContent): RectF {
         val rect = RectF()
         var set = false
+        fun include(left: Float, top: Float, right: Float, bottom: Float) {
+            if (!set) {
+                rect.set(left, top, right, bottom)
+                set = true
+            } else {
+                rect.union(left, top)
+                rect.union(right, bottom)
+            }
+        }
         for (stroke in content.strokes) {
             val pts = stroke.pointsPacked
             var i = 0

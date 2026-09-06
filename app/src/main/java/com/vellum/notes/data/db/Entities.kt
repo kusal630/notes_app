@@ -12,6 +12,10 @@ data class NotebookEntity(
     val title: String,
     /** [com.vellum.notes.model.NoteType] name, stored as text for readability. */
     val type: String = "NORMAL",
+    /** [com.vellum.notes.model.NotebookCovers.Cover.id]; rendered with Compose, no assets. */
+    val coverId: String = "TEAL",
+    /** Per-notebook default paper template ([com.vellum.notes.model.PaperTemplates.Template.id]). */
+    val defaultTemplate: String = "BLANK",
     val isFavorite: Boolean = false,
     val isArchived: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
@@ -37,6 +41,15 @@ data class PageEntity(
     val order: Int = 0,
     /** Serialized [com.vellum.notes.model.PageBackground]. */
     val backgroundJson: String = "{}",
+    /** Per-page paper template override ([com.vellum.notes.model.PaperTemplates.Template.id]). */
+    val templateId: String = "BLANK",
+    /**
+     * PDF-backed page support (feature C): source page index, or -1 for a normal page.
+     * The rasterized page bitmap lives in app-private storage; [pdfBackgroundPath] is the
+     * relative file name under `pdf-pages/`.
+     */
+    val pdfPageIndex: Int = -1,
+    val pdfBackgroundPath: String = "",
     /** Serialized [com.vellum.notes.model.PageContent]. */
     val contentJson: String = "",
     val updatedAt: Long = System.currentTimeMillis(),

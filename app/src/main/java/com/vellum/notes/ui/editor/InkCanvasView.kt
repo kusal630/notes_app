@@ -101,6 +101,27 @@ class InkCanvasView @JvmOverloads constructor(
 
     var background: PageBackground = PageBackground()
 
+    /** Rasterized PDF page drawn beneath ink for PDF-backed pages (null = normal page). */
+    var pdfBackground: android.graphics.Bitmap? = null
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    /** Image objects on the current page (rendered between paper and ink, in z-order). */
+    var images: List<com.vellum.notes.model.ImageObject> = emptyList()
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    /** Decoded bitmaps keyed by [com.vellum.notes.model.ImageObject.fileRef]. */
+    var imageBitmaps: Map<String, android.graphics.Bitmap> = emptyMap()
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     var penStyle: PenStyle = PenStyle()
     var tool: Tool = Tool.PEN
         set(value) {
@@ -521,6 +542,9 @@ class InkCanvasView @JvmOverloads constructor(
             for (p in shape.points) {
                 if (p.y > maxY) maxY = p.y
             }
+        }
+        for (im in images) {
+            if (im.y + im.height > maxY) maxY = im.y + im.height
         }
         // A short/empty page still gets a scrollable extent so the bar behaves predictably.
         return (maxY + 80f).coerceAtLeast(500f)
@@ -1234,7 +1258,28 @@ class InkCanvasView @JvmOverloads constructor(
         // Committed content is drawn every frame from the cached display list, so the
         // whole page is always present at its world position — no bitmap layer to go
         // stale while scrolling (strokes never "reload" or pop in).
-        // Z-order: highlighters < shapes < ink (matches paper behavior).
+        // Z-order: paper < pdf page < images < highlighters < shapes < ink.
+        pdfBackground?.let { bmp ->
+            if (!bmp.isRecycled) {
+                val (pdfW, pdfH) = com.vellum.notes.pdf.PdfImporter.worldSizeMm(bmp.width, bmp.height)
+                canvas.drawBitmap(
+                    bmp,
+                    android.graphics.Rect(0, 0, bmp.width, bmp.height),
+                    android.graphics.RectF(0f, 0f, pdfW, pdfH),
+                    null,
+                )
+            }
+        }
+        for (im in images.sortedBy { it.zOrder }) {
+            val bmp = imageBitmaps[im.fileRef] ?: continue
+            if (bmp.isRecycled) continue
+            canvas.drawBitmap(
+                bmp,
+                android.graphics.Rect(0, 0, bmp.width, bmp.height),
+                android.graphics.RectF(im.x, im.y, im.x + im.width, im.y + im.height),
+                null,
+            )
+        }
         for (item in displayStrokes) {
             if (item.type == com.vellum.notes.model.PenType.HIGHLIGHTER) drawCommittedStroke(canvas, item)
         }

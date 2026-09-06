@@ -73,10 +73,16 @@ class TransformSelectionCommand(
     val transformedStrokes: List<Stroke>,
     val originalShapes: List<ShapeObject>,
     val transformedShapes: List<ShapeObject>,
+    val originalImages: List<ImageObject> = emptyList(),
+    val transformedImages: List<ImageObject> = emptyList(),
+    val originalTexts: List<TextObject> = emptyList(),
+    val transformedTexts: List<TextObject> = emptyList(),
 ) : EditorCommand {
     private val ids: Set<Long> = buildSet {
         originalStrokes.forEach { add(it.id) }
         originalShapes.forEach { add(it.id) }
+        originalImages.forEach { add(it.id) }
+        originalTexts.forEach { add(it.id) }
     }
 
     override fun apply(content: PageContent): PageContent {
@@ -84,14 +90,21 @@ class TransformSelectionCommand(
         for (s in transformedStrokes) strokeById[s.id] = s
         val shapeById = HashMap<Long, ShapeObject>()
         for (s in transformedShapes) shapeById[s.id] = s
+        val imageById = HashMap<Long, ImageObject>()
+        for (s in transformedImages) imageById[s.id] = s
+        val textById = HashMap<Long, TextObject>()
+        for (s in transformedTexts) textById[s.id] = s
         return content.copy(
             strokes = content.strokes.map { strokeById[it.id] ?: it },
             shapeObjects = content.shapeObjects.map { shapeById[it.id] ?: it },
+            imageObjects = content.imageObjects.map { imageById[it.id] ?: it },
+            textObjects = content.textObjects.map { textById[it.id] ?: it },
         )
     }
 
     override fun invert() = TransformSelectionCommand(
         transformedStrokes, originalStrokes, transformedShapes, originalShapes,
+        transformedImages, originalImages, transformedTexts, originalTexts,
     )
 
     override fun canCoalesceWith(other: EditorCommand): Boolean =

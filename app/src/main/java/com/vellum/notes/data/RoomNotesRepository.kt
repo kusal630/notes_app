@@ -31,8 +31,20 @@ class RoomNotesRepository(db: AppDatabase) : NotesRepository {
             rows.map { it.notebook.toModel(pageCount = it.pageCount) }
         }
 
-    override suspend fun createNotebook(title: String, type: NoteType): Long =
-        notebookDao.insert(NotebookEntity(title = title, type = type.name))
+    override suspend fun createNotebook(
+        title: String,
+        type: NoteType,
+        coverId: String,
+        defaultTemplate: String,
+    ): Long =
+        notebookDao.insert(
+            NotebookEntity(
+                title = title,
+                type = type.name,
+                coverId = coverId.ifBlank { "TEAL" },
+                defaultTemplate = defaultTemplate.ifBlank { "BLANK" },
+            )
+        )
 
     override suspend fun renameNotebook(id: Long, title: String) =
         notebookDao.rename(id, title)
@@ -66,15 +78,24 @@ class RoomNotesRepository(db: AppDatabase) : NotesRepository {
     override suspend fun setArchived(id: Long, archived: Boolean) =
         notebookDao.setArchived(id, archived)
 
+    override suspend fun setNotebookCover(id: Long, coverId: String) =
+        notebookDao.setCover(id, coverId.ifBlank { "TEAL" })
+
+    override suspend fun setNotebookDefaultTemplate(id: Long, templateId: String) =
+        notebookDao.setDefaultTemplate(id, templateId.ifBlank { "BLANK" })
+
     override fun pagesFor(notebookId: Long): Flow<List<PageSummary>> =
         pageDao.observePages(notebookId).map { pages ->
             pages.map { it.toModel() }
         }
 
-    override suspend fun createPage(notebookId: Long, title: String): Long {
+    override suspend fun createPage(notebookId: Long, title: String, templateId: String?): Long {
         val order = pageDao.pagesOf(notebookId).size
+        val resolved = templateId?.ifBlank { null }
+            ?: notebookDao.get(notebookId)?.defaultTemplate?.ifBlank { "BLANK" }
+            ?: "BLANK"
         return pageDao.insert(
-            PageEntity(notebookId = notebookId, title = title, order = order)
+            PageEntity(notebookId = notebookId, title = title, order = order, templateId = resolved)
         )
     }
 
@@ -96,6 +117,12 @@ class RoomNotesRepository(db: AppDatabase) : NotesRepository {
 
     override suspend fun renamePage(pageId: Long, title: String) =
         pageDao.rename(pageId, title)
+
+    override suspend fun setPageTemplate(pageId: Long, templateId: String) =
+        pageDao.saveTemplate(pageId, templateId.ifBlank { "BLANK" })
+
+    override suspend fun setPagePdfBackground(pageId: Long, pdfPageIndex: Int, pdfBackgroundPath: String) =
+        pageDao.savePdfBackground(pageId, pdfPageIndex, pdfBackgroundPath)
 
     override suspend fun reorderPage(pageId: Long, newOrder: Int) {
         val target = pageDao.get(pageId) ?: return
@@ -131,6 +158,8 @@ class RoomNotesRepository(db: AppDatabase) : NotesRepository {
             id = id,
             title = title,
             type = runCatching { NoteType.valueOf(type) }.getOrDefault(NoteType.NORMAL),
+            coverId = coverId.ifBlank { "TEAL" },
+            defaultTemplate = defaultTemplate.ifBlank { "BLANK" },
             isFavorite = isFavorite,
             isArchived = isArchived,
             createdAt = createdAt,
@@ -148,6 +177,9 @@ class RoomNotesRepository(db: AppDatabase) : NotesRepository {
             title = title,
             order = order,
             background = background,
+            templateId = templateId.ifBlank { "BLANK" },
+            pdfPageIndex = pdfPageIndex,
+            pdfBackgroundPath = pdfBackgroundPath,
             updatedAt = updatedAt,
         )
     }

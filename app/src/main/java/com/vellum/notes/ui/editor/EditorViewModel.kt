@@ -129,6 +129,7 @@ class EditorViewModel(
     fun setPenStyle(style: PenStyle) = _editor.value?.setPenStyle(style)
     fun setEraserSize(sizeMm: Float) = _editor.value?.setEraserSize(sizeMm)
     fun setShapeKind(kind: ShapeKind) = _editor.value?.setShapeKind(kind)
+    fun addImage(image: com.vellum.notes.model.ImageObject) = _editor.value?.addImage(image)
     fun setTranscript(segments: List<com.vellum.notes.model.TranscriptSegment>) =
         _editor.value?.setTranscript(segments)
     fun setSummary(summary: String?) = _editor.value?.setSummary(summary)
