@@ -987,10 +987,15 @@ class InkCanvasView @JvmOverloads constructor(
     private fun eraserContact(classified: ClassifiedFrame): com.premiumnotes.input.ClassifiedContact? {
         var id = eraserPointerId
         if (id == -1) {
-            id = classified.activeWritingPointerId
+            // A hardware eraser tool always wins over the writing lock holder: when the
+            // eraser joins while a pen is still down, erasing must follow the eraser
+            // pointer, not keep scrubbing with the pen position.
+            id = classified.contacts.firstOrNull {
+                it.classification == com.premiumnotes.input.ContactClassification.ERASER
+            }?.contact?.pointerId
+                ?: classified.activeWritingPointerId
                 ?: classified.contacts.firstOrNull {
                     it.classification == com.premiumnotes.input.ContactClassification.WRITING ||
-                        it.classification == com.premiumnotes.input.ContactClassification.ERASER ||
                         it.classification == com.premiumnotes.input.ContactClassification.FINGER
                 }?.contact?.pointerId
                 ?: -1

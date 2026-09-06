@@ -352,12 +352,22 @@ class PalmRejectionEngine(
                 if (lifted != null) {
                     lock.release(lifted, nowNanos)
                     pointerStates.remove(lifted)
+                    // The tracker keeps its own per-pointer motion state: drop the lifted
+                    // pointer there too. Without this a reused pointer id on the next
+                    // DOWN is treated as a continuing contact (stale isNew=false,
+                    // stale resting classification, stale distance window) instead of
+                    // a fresh touch.
+                    restingTracker.removePointer(lifted)
                 }
             }
 
             InputAction.CANCEL -> {
                 lock.reset(nowNanos)
                 pointerStates.clear()
+                // A cancel aborts the whole gesture: no contact survives, so the
+                // tracker's motion states and noise estimate must not leak into the
+                // next gesture (stale RESTING/CANDIDATE would swallow the next stroke).
+                restingTracker.reset()
             }
 
             InputAction.MOVE -> Unit

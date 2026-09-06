@@ -72,6 +72,11 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
         restingNoiseMmPerSec = 0f
     }
 
+    /** Drops a single pointer's motion state (call when it lifts so ids can be reused). */
+    fun removePointer(pointerId: Int) {
+        pointerStates.remove(pointerId)
+    }
+
     /**
      * Updates per-pointer motion/size state for the current frame, computes the resting
      * context (edge / cluster / multi-contact), and produces the adjusted classification
@@ -307,6 +312,19 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
             } else if (strokeLikeMotion(st)) c.contact.pointerId else null
         }.toSet()
 
+        // Every stroke-like mover INCLUDING resting fingers (same exclusions otherwise).
+        // Promotion requires being the UNIQUE mover across all of these: two resting
+        // fingers sweeping together is a hand shift / gesture, never two writers.
+        val allStrokeLikeIds = baseClassified.mapNotNull { c ->
+            val st = pointerStates[c.contact.pointerId] ?: return@mapNotNull null
+            if (c.classification == ContactClassification.PALM ||
+                c.classification == ContactClassification.REJECTED ||
+                c.contact.pointerId == activeWritingPointerId
+            ) {
+                null
+            } else if (strokeLikeMotion(st)) c.contact.pointerId else null
+        }.toSet()
+
         val adjusted = ArrayList<ClassifiedContact>(baseClassified.size)
         var promoteId: Int? = null
         var cancelId: Int? = null
@@ -360,9 +378,12 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                             // A resting finger can become the writer if it is the ONLY thing
                             // moving while everything else stays put (e.g. the user starts
                             // writing with a finger that was already resting on the screen).
+                            // Uniqueness is checked across ALL stroke-like movers (including
+                            // other resting fingers): two resting fingers moving fast
+                            // together is a gesture/hand-shift, never a writer.
                             if (activeWritingPointerId == null &&
-                                movingIds.isEmpty() &&
-                                strokeLikeMotion(st) &&
+                                allStrokeLikeIds.size == 1 &&
+                                allStrokeLikeIds.contains(id) &&
                                 st.lastFrameDistPx > pxPerMm * MOVEMENT_JITTER_MM
                             ) {
                                 finalCls = ContactClassification.WRITING
@@ -390,7 +411,8 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
                                 strokeLikeMotion(st) -> {
                                     if (activeWritingPointerId == null &&
                                         movingIds.size == 1 &&
-                                        movingIds.contains(id)
+                                        movingIds.contains(id) &&
+                                        allStrokeLikeIds.size == 1
                                     ) {
                                         // The unique mover among ambiguous contacts: promote it
                                         // to the writing pointer.

@@ -347,10 +347,21 @@ class PalmClassifier(
             } else if (contact.maxDimMm <= fingerMax) {
                 result(ContactClassification.FINGER, confidence, ClassificationReason.MEDIUM_CONTACT, fingerMax, ctx)
             } else {
-                result(ContactClassification.WRITING, confidence, ClassificationReason.SMALL_CONTACT, fingerMax, ctx)
+                // Within the generous valid multiple but larger than a normal finger:
+                // a gesture finger, NEVER a writer. Returning WRITING here let a lone
+                // palm-sized contact draw after finger use seeded a large valid average.
+                result(ContactClassification.FINGER, confidence, ClassificationReason.MEDIUM_CONTACT, fingerMax, ctx)
             }
         } else {
-            result(ContactClassification.WRITING, confidence, ClassificationReason.SMALL_CONTACT, writingMax, ctx)
+            // STRICT/WRITING: only genuinely small contacts write. A contact within the
+            // generous valid multiple but above the (finger-widened) writing cutoff is
+            // a palm, never a writer — otherwise a lone palm draws after finger use.
+            val writingDim = if (ctx.fingerWritingEnabled) maxOf(writingMax, fingerMax) else writingMax
+            return if (contact.maxDimMm <= writingDim) {
+                result(ContactClassification.WRITING, confidence, ClassificationReason.SMALL_CONTACT, writingMax, ctx)
+            } else {
+                result(ContactClassification.PALM, confidence, ClassificationReason.LARGE_CONTACT, writingDim, ctx)
+            }
         }
     }
 

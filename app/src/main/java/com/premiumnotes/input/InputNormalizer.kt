@@ -29,6 +29,7 @@ class InputNormalizer(private val capabilities: InputCapabilities) {
             hasGeometry && raw.toolMajorPx < maxPlausiblePx -> {
                 majorPx = raw.toolMajorPx
                 minorPx = raw.toolMinorPx.coerceAtLeast(raw.toolMajorPx * 0.25f)
+                    .coerceAtMost(maxPlausiblePx)
             }
             hasSize -> {
                 // getSize() is relative to the touch surface; approximate its extent with
@@ -38,15 +39,20 @@ class InputNormalizer(private val capabilities: InputCapabilities) {
                     // Degenerate value — treat as no usable size.
                     majorPx = 0f
                     minorPx = 0f
+                    hasGeometry = false
                     hasSize = false
                 } else {
+                    // Size-derived ellipse is NOT tool geometry: mark geometry unavailable
+                    // so the classifier/diagnostics never over-trust it as a measured axis.
                     majorPx = sizePx
                     minorPx = sizePx * 0.7f
+                    hasGeometry = false
                 }
             }
             else -> {
                 majorPx = 0f
                 minorPx = 0f
+                hasGeometry = false
             }
         }
 
