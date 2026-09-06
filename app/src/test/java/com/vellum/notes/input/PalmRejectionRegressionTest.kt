@@ -416,4 +416,62 @@ class PalmRejectionRegressionTest {
         assertEquals(0, out.activeWritingPointerId)
         assertTrue(out.gesturePointerIds.isEmpty())
     }
+
+    // --- device-verified scenarios (emulator injection found these) ------------
+
+    /** A brief large palm TAP (DOWN + 3 MOVEs + UP in ~250ms) must never write. */
+    @Test
+    fun largePalmTapNeverWrites() {
+        val e = engine()
+        val t0 = 0L
+        val down = e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, t0,
+                listOf(TestTouchFactory.palm(2, x = 800f, y = 600f, timeMs = t0)), added = 2,
+            )
+        )
+        assertNull("large tap DOWN must not claim the writing lock", down.activeWritingPointerId)
+        assertEquals(ContactClassification.PALM, down.contactFor(2)?.classification)
+
+        // brief wiggle while the palm tap settles
+        for (i in 1..3) {
+            val t = t0 + i * 80L
+            val out = e.process(
+                TestTouchFactory.frame(
+                    InputAction.MOVE, t,
+                    listOf(TestTouchFactory.palm(2, x = 800f + i * 3f, y = 600f + i * 2f, timeMs = t)),
+                )
+            )
+            assertEquals("large tap MOVE must never classify WRITING (frame $i)", ContactClassification.PALM, out.contactFor(2)?.classification)
+        }
+        val up = e.process(
+            TestTouchFactory.frame(InputAction.UP, 250L, listOf(TestTouchFactory.palm(2, timeMs = 250L)), lifted = 2)
+        )
+        assertNull("large tap UP must not leave a writing lock", up.activeWritingPointerId)
+    }
+
+    /** A large contact moving quickly (a dragged palm) must never write ink. */
+    @Test
+    fun largeMovingContactNeverWrites() {
+        val e = engine()
+        val down = e.process(
+            TestTouchFactory.frame(
+                InputAction.DOWN, 0L,
+                listOf(TestTouchFactory.palm(2, x = 600f, y = 900f, timeMs = 0L)), added = 2,
+            )
+        )
+        assertNull(down.activeWritingPointerId)
+        var last = down
+        for (i in 1..10) {
+            val t = i * 60L
+            last = e.process(
+                TestTouchFactory.frame(
+                    InputAction.MOVE, t,
+                    listOf(TestTouchFactory.palm(2, x = 600f + i * 30f, y = 900f + i * 10f, timeMs = t)),
+                )
+            )
+            assertEquals("dragged palm must never classify WRITING (frame $i)", ContactClassification.PALM, last.contactFor(2)?.classification)
+            assertNull("dragged palm must never take the lock", last.activeWritingPointerId)
+        }
+    }
 }
