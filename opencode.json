@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "_comment": "Permissions for agent-built projects: the agent may edit files and run commands inside this project, but DELETION and system-level destructive commands are denied. Copy this file into each new project folder as opencode.json.",
+  "permission": {
+    "edit": "allow",
+    "webfetch": "allow",
+    "bash": {
+      "*": "allow",
+      "rm *": "deny",
+      "rm -rf *": "deny",
+      "rmdir *": "deny",
+      "unlink *": "deny",
+      "shred *": "deny",
+      "truncate *": "deny",
+      "sudo *": "deny",
+      "mkfs*": "deny",
+      "dd *": "deny",
+      ": > *": "deny",
+      "> *": "deny",
+      "git push --force*": "ask",
+      "git push -f*": "ask",
+      "git reset --hard*": "ask",
+      "git clean *": "ask"
+    }
+  }
+}

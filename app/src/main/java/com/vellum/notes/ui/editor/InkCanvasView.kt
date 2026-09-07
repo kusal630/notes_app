@@ -287,6 +287,7 @@ class InkCanvasView @JvmOverloads constructor(
     private data class CachedShape(
         val path: Path,
         val paint: Paint,
+        val fillPaint: Paint?,
         val corner0: Point,
         val corner1: Point,
     )
@@ -1243,7 +1244,13 @@ class InkCanvasView @JvmOverloads constructor(
     private fun buildShapeGeometry(shape: ShapeObject): CachedShape {
         val c0 = shape.points.getOrNull(0) ?: Point(shape.x, shape.y)
         val c1 = shape.points.getOrNull(1) ?: Point(shape.x, shape.y)
-        return CachedShape(ShapeRenderer.buildPath(shape), ShapeRenderer.outlinePaint(shape), c0, c1)
+        return CachedShape(
+            ShapeRenderer.buildPath(shape),
+            ShapeRenderer.outlinePaint(shape),
+            ShapeRenderer.fillPaint(shape),
+            c0,
+            c1,
+        )
     }
 
     private fun appendShapeGeometry(shape: ShapeObject) {
@@ -1365,7 +1372,10 @@ class InkCanvasView @JvmOverloads constructor(
         for (item in displayStrokes) {
             if (item.type == com.vellum.notes.model.PenType.HIGHLIGHTER) drawCommittedStroke(canvas, item)
         }
-        for (item in displayShapes) canvas.drawPath(item.path, item.paint)
+        for (item in displayShapes) {
+            item.fillPaint?.let { canvas.drawPath(item.path, it) }
+            canvas.drawPath(item.path, item.paint)
+        }
         for (item in displayStrokes) {
             if (item.type != com.vellum.notes.model.PenType.HIGHLIGHTER) drawCommittedStroke(canvas, item)
         }

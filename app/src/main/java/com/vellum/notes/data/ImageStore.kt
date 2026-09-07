@@ -57,6 +57,15 @@ object ImageStore {
         return if (file.exists()) file else null
     }
 
+    /** Deletes an image file from storage if present. */
+    fun deleteFile(context: Context, fileRef: String): Boolean {
+        if (fileRef.isBlank()) return false
+        val name = fileRef.substringAfterLast("/")
+        if (name.isBlank() || "/" in name) return false
+        val file = File(mediaDir(context), name)
+        return runCatching { file.delete() }.getOrDefault(false)
+    }
+
     /**
      * Default placement for a newly inserted image: centered on the visible viewport,
      * capped to [maxWidthMm] wide preserving [aspect] (w/h). Pure math for tests.

@@ -116,4 +116,14 @@ object ShapeRenderer {
         strokeWidth = shape.strokeWidthMm.coerceAtLeast(0.2f)
         color = (shape.colorArgb and 0xFFFFFFFF.toLong()).toInt()
     }
+
+    /** Fill paint for a shape (returns null if fill is not enabled). */
+    fun fillPaint(shape: ShapeObject): Paint? {
+        if (!shape.fillEnabled || shape.fillColorArgb == null) return null
+        return Paint().apply {
+            isAntiAlias = true
+            style = Paint.Style.FILL
+            color = (shape.fillColorArgb and 0xFFFFFFFF.toLong()).toInt()
+        }
+    }
 }

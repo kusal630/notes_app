@@ -105,7 +105,7 @@ object PdfExporter {
                     )
                 }
 
-                // Z-order: paper/pdf < images < highlighters < shapes < ink.
+                // Z-order: paper/pdf < images < text < highlighters < shapes < ink.
                 if (imageBitmaps != null) {
                     for (im in content.imageObjects.sortedBy { it.zOrder }) {
                         val bmp = imageBitmaps[im.fileRef] ?: continue
@@ -119,6 +119,38 @@ object PdfExporter {
                     }
                 }
 
+                // Text objects: world-space boxes drawn between images and ink.
+                for (t in content.textObjects) {
+                    if (t.text.isBlank()) continue
+                    val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = t.colorArgb.toInt()
+                        textSize = t.fontSizeMm
+                        typeface = if (t.bold) android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.BOLD)
+                                   else android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.NORMAL)
+                        isSubpixelText = true
+                    }
+                    canvas.save()
+                    canvas.rotate(t.rotation, t.x, t.y)
+                    val maxW = t.width.coerceAtLeast(1f)
+                    val lines = ArrayList<String>()
+                    for (raw in t.text.split('\n')) {
+                        var line = ""
+                        for (word in raw.split(' ')) {
+                            val candidate = if (line.isEmpty()) word else "$line $word"
+                            if (textPaint.measureText(candidate) > maxW && line.isNotEmpty()) {
+                                lines += line; line = word
+                            } else line = candidate
+                        }
+                        lines += line
+                    }
+                    var y = t.y + t.fontSizeMm
+                    for (line in lines) {
+                        canvas.drawText(line, t.x, y, textPaint)
+                        y += t.fontSizeMm * 1.35f
+                    }
+                    canvas.restore()
+                }
+
                 // Z-order: highlighters below ink (same rule as the canvas).
                 val highlighters = ArrayList<Stroke>()
                 val ink = ArrayList<Stroke>()
@@ -128,7 +160,9 @@ object PdfExporter {
                 val renderer = InkRenderer()
                 for (stroke in highlighters) renderer.drawStroke(canvas, stroke, 1f)
                 for (shape in content.shapeObjects) {
-                    canvas.drawPath(ShapeRenderer.buildPath(shape), ShapeRenderer.outlinePaint(shape))
+                    val path = ShapeRenderer.buildPath(shape)
+                    ShapeRenderer.fillPaint(shape)?.let { canvas.drawPath(path, it) }
+                    canvas.drawPath(path, ShapeRenderer.outlinePaint(shape))
                 }
                 for (stroke in ink) renderer.drawStroke(canvas, stroke, 1f)
 
@@ -178,14 +212,14 @@ object PdfExporter {
                 val top = kotlin.math.min(a.y, b.y)
                 val right = kotlin.math.max(a.x, b.x)
                 val bottom = kotlin.math.max(a.y, b.y)
-                if (!set) {
-                    rect.set(left, top, right, bottom)
-                    set = true
-                } else {
-                    rect.union(left, top)
-                    rect.union(right, bottom)
-                }
+                include(left, top, right, bottom)
             }
+        }
+        for (im in content.imageObjects) {
+            include(im.x, im.y, im.x + im.width, im.y + im.height)
+        }
+        for (t in content.textObjects) {
+            include(t.x, t.y, t.x + t.width, t.y + t.height)
         }
         if (!set) {
             rect.set(0f, 0f, 210f, 297f)

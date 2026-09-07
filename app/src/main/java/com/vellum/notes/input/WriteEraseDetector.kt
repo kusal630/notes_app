@@ -30,7 +30,7 @@ class WriteEraseDetector(
     /** The reversal threshold must be reached within this many ms of gesture start. */
     val maxDurationMs: Long = 2500,
     /** Minimum path length (world mm) before any evaluation happens. */
-    val minPathMm: Float = 8f,
+    val minPathMm: Float = 6f,
     /** Direction changes closer than this (world mm) are jitter, not reversals. */
     private val minSegmentMm: Float = 1.5f,
 ) {
