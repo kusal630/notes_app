@@ -166,6 +166,15 @@ class RemoveShapesCommand(val shapes: List<ShapeObject>) : EditorCommand {
     override fun invert() = AddShapesCommand(shapes)
 }
 
+/** Atomically updates a text object's properties or content (single undo step). */
+class UpdateTextCommand(val previous: TextObject, val updated: TextObject) : EditorCommand {
+    override fun apply(content: PageContent): PageContent = content.copy(
+        textObjects = content.textObjects.map { if (it.id == updated.id) updated else it }
+    )
+
+    override fun invert() = UpdateTextCommand(previous = updated, updated = previous)
+}
+
 /**
  * Bounded undo/redo stacks. Keeps memory small for large notebooks (default 200
  * commands) and drops the redo stack on new edits, matching standard editor behavior.

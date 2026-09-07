@@ -482,4 +482,76 @@ class NoteEditorStateTest {
         s.setSummary(null)
         assertEquals(null, s.content.value.summary)
     }
+
+    @Test
+    fun addTextAndUndoRedo() {
+        val s = state()
+        val text = com.vellum.notes.model.TextObject(
+            id = 0L,
+            x = 10f,
+            y = 20f,
+            width = 50f,
+            height = 20f,
+            text = "Test note",
+        )
+        s.addText(text)
+        assertEquals(1, s.content.value.textObjects.size)
+        assertTrue(s.content.value.textObjects.first().id > 0)
+        assertEquals("Test note", s.content.value.textObjects.first().text)
+
+        s.undo()
+        assertEquals(0, s.content.value.textObjects.size)
+
+        s.redo()
+        assertEquals(1, s.content.value.textObjects.size)
+        assertEquals("Test note", s.content.value.textObjects.first().text)
+    }
+
+    @Test
+    fun updateTextAtomicallyUndoesInSingleStep() {
+        val s = state()
+        val text = com.vellum.notes.model.TextObject(
+            id = 101L,
+            x = 10f,
+            y = 20f,
+            width = 50f,
+            height = 20f,
+            text = "Initial",
+        )
+        s.addText(text)
+        val updated = text.copy(text = "Updated text")
+        s.updateText(updated)
+        assertEquals("Updated text", s.content.value.textObjects.first().text)
+
+        // Single undo step restores the initial text
+        s.undo()
+        assertEquals("Initial", s.content.value.textObjects.first().text)
+
+        // Single redo step restores the updated text
+        s.redo()
+        assertEquals("Updated text", s.content.value.textObjects.first().text)
+    }
+
+    @Test
+    fun addImageAndUndoRedo() {
+        val s = state()
+        val img = com.vellum.notes.model.ImageObject(
+            id = 0L,
+            x = 5f,
+            y = 5f,
+            width = 40f,
+            height = 30f,
+            fileRef = "note-media/img-1.jpg",
+        )
+        s.addImage(img)
+        assertEquals(1, s.content.value.imageObjects.size)
+        assertTrue(s.content.value.imageObjects.first().id > 0)
+
+        s.undo()
+        assertEquals(0, s.content.value.imageObjects.size)
+
+        s.redo()
+        assertEquals(1, s.content.value.imageObjects.size)
+        assertEquals("note-media/img-1.jpg", s.content.value.imageObjects.first().fileRef)
+    }
 }

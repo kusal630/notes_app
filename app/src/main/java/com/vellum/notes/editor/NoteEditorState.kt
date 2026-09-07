@@ -131,8 +131,7 @@ class NoteEditorState(
     /** Replaces a text object's content (undoable). */
     fun updateText(updated: com.vellum.notes.model.TextObject) {
         val current = _content.value.textObjects.firstOrNull { it.id == updated.id } ?: return
-        apply(RemoveObjectsCommand(textObjects = listOf(current)))
-        apply(AddObjectsCommand(textObjects = listOf(updated)))
+        apply(UpdateTextCommand(previous = current, updated = updated))
     }
 
     /** Moves an image by delta (undoable, coalesced during drags). */
