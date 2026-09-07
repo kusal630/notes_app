@@ -85,6 +85,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.input.key.Key
@@ -765,7 +766,7 @@ private fun EditorTopBar(
                 Icon(
                     Icons.Filled.Mic,
                     contentDescription = "Classroom Notes (record & transcribe)",
-                    tint = if (isRecording) Color(0xFFE53935) else LocalContentColor.current,
+                    tint = if (isRecording) MaterialTheme.colorScheme.error else LocalContentColor.current,
                 )
             }
         }
@@ -810,7 +811,7 @@ private fun ClassroomSidebar(
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(48.dp)
                         .background(MaterialTheme.colorScheme.surface, CircleShape),
                 ) {
                     Icon(
@@ -826,7 +827,7 @@ private fun ClassroomSidebar(
                     Box(
                         Modifier
                             .size(8.dp)
-                            .background(Color(0xFFE53935), CircleShape)
+                            .background(MaterialTheme.colorScheme.error, CircleShape)
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
@@ -956,7 +957,7 @@ private fun SidebarTab(label: String, selected: Boolean, onClick: () -> Unit, mo
                 else MaterialTheme.colorScheme.surface
             )
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
+            .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -994,7 +995,7 @@ private fun PageRail(
                             val isCurrent = page.id == currentPageId
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
+                                    .defaultMinSize(minHeight = 48.dp)
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(
                                         if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
@@ -1028,7 +1029,7 @@ private fun PageRail(
             } else {
                 Button(
                     onClick = onNewPage,
-                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
@@ -1062,6 +1063,7 @@ private fun PageThumbnail(page: PageSummary, selected: Boolean, onClick: () -> U
             modifier = Modifier.padding(6.dp),
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -1268,6 +1270,7 @@ private fun EditorToolbar(
                                 val selected = penStyle.type == type
                                 Box(
                                     modifier = Modifier
+                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                                         .clip(RoundedCornerShape(14.dp))
                                         .background(
                                             if (selected) MaterialTheme.colorScheme.primaryContainer
@@ -1306,7 +1309,7 @@ private fun EditorToolbar(
                             val selected = settings.smoothing == mode
                             Box(
                                 modifier = Modifier
-                                    .size(26.dp)
+                                    .size(48.dp)
                                     .clip(CircleShape)
                                     .border(
                                         width = if (selected) 2.dp else 1.dp,
@@ -1333,6 +1336,7 @@ private fun EditorToolbar(
                             val selected = shapeKind == kind
                             Box(
                                 modifier = Modifier
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                                     .clip(RoundedCornerShape(14.dp))
                                     .background(
                                         if (selected) MaterialTheme.colorScheme.primaryContainer
@@ -1367,7 +1371,7 @@ private fun EditorToolbar(
                             val selected = kotlin.math.abs(eraserSizeMm - s) < 0.1f
                             Box(
                                 modifier = Modifier
-                                    .size(28.dp)
+                                    .size(48.dp)
                                     .clip(CircleShape)
                                     .border(
                                         width = if (selected) 2.dp else 1.dp,
@@ -1432,7 +1436,7 @@ private fun ColorRow(penStyle: PenStyle, onColor: (Long) -> Unit) {
             val selected = penStyle.colorArgb == c
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(Color(c))
                     .border(
@@ -1459,7 +1463,7 @@ private fun WidthRow(penStyle: PenStyle, onWidth: (Float) -> Unit) {
             val selected = kotlin.math.abs(penStyle.widthMm - w) < 0.01f
             Box(
                 modifier = Modifier
-                    .size(26.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .border(
                         width = if (selected) 2.dp else 1.dp,
