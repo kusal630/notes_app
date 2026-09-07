@@ -72,9 +72,8 @@ class AudioCaptureService : Service() {
         }
         val rec = VoskSpeechToText(this)
         recognizer = rec
-        SpeechController.beginRecording(pageId)
         startedAtMs = System.currentTimeMillis()
-        captureThread = Thread({ runCapture(rec) }, "vosk-capture").also { it.start() }
+        captureThread = Thread({ runCapture(rec, pageId) }, "vosk-capture").also { it.start() }
     }
 
     private fun startAsForeground() {
@@ -105,7 +104,7 @@ class AudioCaptureService : Service() {
         }
     }
 
-    private fun runCapture(rec: VoskSpeechToText) {
+    private fun runCapture(rec: VoskSpeechToText, pageId: Long) {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
         val bufferSize = AudioRecord.getMinBufferSize(
             VoskSpeechToText.SAMPLE_RATE,
@@ -123,6 +122,8 @@ class AudioCaptureService : Service() {
         try {
             if (record.state != AudioRecord.STATE_INITIALIZED) return
             record.startRecording()
+            SpeechController.beginRecording(pageId)
+            startedAtMs = System.currentTimeMillis()
             val buf = ShortArray(bufferSize / 2)
             while (!Thread.currentThread().isInterrupted) {
                 val read = record.read(buf, 0, buf.size)

@@ -59,6 +59,11 @@ class InkCanvasView @JvmOverloads constructor(
         fun onEraseAt(x: Float, y: Float, radiusMm: Float)
         fun onEraseAlong(x1: Float, y1: Float, x2: Float, y2: Float, radiusMm: Float)
         fun onEraseGestureEnd()
+        /**
+         * Strike-out word erase: the erase gesture ended; [minX]..[maxY] is the
+         * gesture's world-space bounding box. The caller erases everything inside.
+         */
+        fun onScribbleWordErase(minX: Float, minY: Float, maxX: Float, maxY: Float, marginMm: Float) {}
         fun onViewportChanged(zoom: Float, offsetX: Float, offsetY: Float)
         fun onSelectInRect(rect: RectF)
         fun onSelectionDragStart(worldX: Float, worldY: Float)
@@ -104,8 +109,11 @@ class InkCanvasView @JvmOverloads constructor(
     /** Rasterized PDF page drawn beneath ink for PDF-backed pages (null = normal page). */
     var pdfBackground: android.graphics.Bitmap? = null
         set(value) {
-            field = value
-            invalidate()
+            if (field !== value) {
+                field?.recycle()
+                field = value
+                invalidate()
+            }
         }
 
     /** Image objects on the current page (rendered between paper and ink, in z-order). */
@@ -121,8 +129,11 @@ class InkCanvasView @JvmOverloads constructor(
     /** Decoded bitmaps keyed by [com.vellum.notes.model.ImageObject.fileRef]. */
     var imageBitmaps: Map<String, android.graphics.Bitmap> = emptyMap()
         set(value) {
-            field = value
-            invalidate()
+            if (field !== value) {
+                field.forEach { it.value?.recycle() }
+                field = value
+                invalidate()
+            }
         }
 
     var penStyle: PenStyle = PenStyle()
@@ -148,7 +159,13 @@ class InkCanvasView @JvmOverloads constructor(
     /** When on, the canvas draws a live per-contact classification overlay (settings toggle). */
     var debugOverlayEnabled: Boolean = false
 
-    private val writeEraseDetector = com.vellum.notes.input.WriteEraseDetector()
+    private var writeEraseDetector = com.vellum.notes.input.WriteEraseDetector()
+    private var detectorSensitivity: com.vellum.notes.input.ScribbleSensitivity? = null
+    /** Current scribble sensitivity preset (set from settings each frame). */
+    var scribbleSensitivity: com.vellum.notes.input.ScribbleSensitivity =
+        com.vellum.notes.input.ScribbleSensitivity.BALANCED
+    /** World-space points of the current erase gesture (scribble word-erase bbox). */
+    private var eraseGesturePoints: ArrayList<Point>? = null
 
     /** While true, the current gesture is being treated as erase even though the user
      *  is on the pen tool (Feature 1 auto-detection fired mid-gesture). */
@@ -304,6 +321,16 @@ class InkCanvasView @JvmOverloads constructor(
     fun screenToWorldY(sy: Float) = (sy - offsetY) / scale
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (detectorSensitivity != scribbleSensitivity) {
+            detectorSensitivity = scribbleSensitivity
+            val s = scribbleSensitivity
+            writeEraseDetector = com.vellum.notes.input.WriteEraseDetector(
+                minReversals = s.minReversals,
+                minReversalsOnInk = s.minReversalsOnInk,
+                scribbleBoxMm = s.scribbleBoxMm,
+                maxDurationMs = s.maxDurationMs,
+            )
+        }
         val input = MotionEventParser.parse(event)
 
         // The scroll bar and the palm-zone grip are direct-manipulation surfaces that
@@ -718,6 +745,7 @@ class InkCanvasView @JvmOverloads constructor(
                         ) {
                             finalizeActiveStroke()
                             gestureEraseOverride = true
+                            eraseGesturePoints = arrayListOf(Point(worldX, worldY))
                             lastEraserPoint = Point(worldX, worldY)
                             listener?.onEraseGestureBegin()
                             listener?.onEraseAt(worldX, worldY, eraserSizeMm / 2f)
@@ -1058,6 +1086,7 @@ class InkCanvasView @JvmOverloads constructor(
                 val worldX = screenToWorldX(contact.contact.x)
                 val worldY = screenToWorldY(contact.contact.y)
                 val radius = eraserSizeMm / 2f
+                eraseGesturePoints = arrayListOf(Point(worldX, worldY))
                 listener?.onEraseAt(worldX, worldY, radius)
                 lastEraserPoint = Point(worldX, worldY)
             }
@@ -1066,6 +1095,7 @@ class InkCanvasView @JvmOverloads constructor(
                 val worldX = screenToWorldX(contact.contact.x)
                 val worldY = screenToWorldY(contact.contact.y)
                 val radius = eraserSizeMm / 2f
+                eraseGesturePoints?.add(Point(worldX, worldY))
                 val prev = lastEraserPoint
                 if (prev == null) {
                     listener?.onEraseAt(worldX, worldY, radius)
@@ -1078,6 +1108,22 @@ class InkCanvasView @JvmOverloads constructor(
             com.vellum.notes.input.InputAction.POINTER_UP,
             com.vellum.notes.input.InputAction.CANCEL,
             -> {
+                // Strike-out word erase: a scribble gesture erases the WHOLE word —
+                // every object whose geometry intersects the gesture's bounding box —
+                // not just the ink the nib radius physically touched.
+                val path = eraseGesturePoints
+                eraseGesturePoints = null
+                if (path != null && path.size >= 2 && gestureEraseOverride) {
+                    var minX = path[0].x; var maxX = path[0].x
+                    var minY = path[0].y; var maxY = path[0].y
+                    for (pt in path) {
+                        if (pt.x < minX) minX = pt.x
+                        if (pt.x > maxX) maxX = pt.x
+                        if (pt.y < minY) minY = pt.y
+                        if (pt.y > maxY) maxY = pt.y
+                    }
+                    listener?.onScribbleWordErase(minX, minY, maxX, maxY, eraserSizeMm / 2f)
+                }
                 lastEraserPoint = null
                 eraserPointerId = -1
                 listener?.onEraseGestureEnd()

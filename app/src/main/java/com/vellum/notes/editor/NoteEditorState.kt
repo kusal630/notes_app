@@ -645,6 +645,82 @@ class NoteEditorState(
         return applyEraseHit(hit)
     }
 
+    /**
+     * Strike-out (scribble) word erase: removes every object intersecting the
+     * scribble's bounding box, inflated by [marginMm]. Undoable — joins the open
+     * erase batch so the whole gesture stays a single undo step.
+     */
+    fun eraseInRect(
+        minX: Float,
+        minY: Float,
+        maxX: Float,
+        maxY: Float,
+        marginMm: Float = 2f,
+    ): Int {
+        val hit = collectEraseRect(minX, minY, maxX, maxY, marginMm)
+        return applyEraseHit(hit)
+    }
+
+    private fun collectEraseRect(
+        minX: Float,
+        minY: Float,
+        maxX: Float,
+        maxY: Float,
+        marginMm: Float,
+    ): EraseHit {
+        val loX = minX - marginMm
+        val loY = minY - marginMm
+        val hiX = maxX + marginMm
+        val hiY = maxY + marginMm
+        fun inRect(x: Float, y: Float) = x >= loX && x <= hiX && y >= loY && y <= hiY
+
+        val highlighters = ArrayList<Stroke>()
+        val ink = ArrayList<Stroke>()
+        for (s in _content.value.strokes) {
+            val pts = s.pointsPacked
+            var i = 0
+            var hitStroke = false
+            // Any vertex or segment midpoint inside the box counts as struck through.
+            while (i + 1 < pts.size) {
+                if (inRect(pts[i], pts[i + 1])) { hitStroke = true; break }
+                i += 2
+            }
+            if (!hitStroke && pts.size >= 4) {
+                // also test segment midpoints so a fast zigzag whose sparse samples
+                // land outside the box still erases the crossed word
+                i = 0
+                while (i + 3 < pts.size) {
+                    val mx = (pts[i] + pts[i + 2]) / 2f
+                    val my = (pts[i + 1] + pts[i + 3]) / 2f
+                    if (inRect(mx, my)) { hitStroke = true; break }
+                    i += 2
+                }
+            }
+            if (hitStroke) {
+                if (s.style.type == PenType.HIGHLIGHTER) highlighters += s else ink += s
+            }
+        }
+        fun bboxOverlaps(x: Float, y: Float, w: Float, h: Float) =
+            x + w >= loX && x <= hiX && y + h >= loY && y <= hiY
+        val text = _content.value.textObjects.filter { bboxOverlaps(it.x, it.y, it.width, it.height) }
+        val shapes = _content.value.shapeObjects.filter { shape ->
+            // shapes carry raw points, not a stored bbox — test their vertices + midpoints
+            val pts = shape.points
+            var hit = false
+            for (i in pts.indices) {
+                if (inRect(pts[i].x, pts[i].y)) { hit = true; break }
+            }
+            if (!hit) {
+                for (i in 0 until pts.size - 1) {
+                    if (inRect((pts[i].x + pts[i + 1].x) / 2f, (pts[i].y + pts[i + 1].y) / 2f)) { hit = true; break }
+                }
+            }
+            hit
+        }
+        val images = _content.value.imageObjects.filter { bboxOverlaps(it.x, it.y, it.width, it.height) }
+        return EraseHit(highlighters = highlighters, ink = ink, shapes = shapes, textObjects = text, images = images)
+    }
+
     private fun applyEraseHit(hit: EraseHit): Int {
         if (hit.isEmpty) return 0
         if (eraseBatch != null) {

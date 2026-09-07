@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.vellum.notes.input.CalibrationData
@@ -47,6 +48,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val FINGER_WRITING_KEY = booleanPreferencesKey("finger_writing")
         private val AUTO_CONVERT_HANDWRITING_KEY = booleanPreferencesKey("auto_convert_handwriting")
         private val AUTO_ERASE_KEY = booleanPreferencesKey("auto_erase_enabled")
+        private val SCRIBBLE_SENSITIVITY_KEY = stringPreferencesKey("scribble_sensitivity")
         private val CALIBRATION_FINGER_KEY = floatPreferencesKey("calibration_finger")
         private val CALIBRATION_PEN_KEY = floatPreferencesKey("calibration_pen")
         private val CALIBRATION_PALM_KEY = floatPreferencesKey("calibration_palm")
@@ -95,6 +97,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             prefs[FINGER_WRITING_KEY] = current.enableFingerWriting
             prefs[AUTO_CONVERT_HANDWRITING_KEY] = current.autoConvertHandwritingToText
             prefs[AUTO_ERASE_KEY] = current.autoEraseEnabled
+            prefs[SCRIBBLE_SENSITIVITY_KEY] = current.scribbleSensitivity.name
             current.calibration.fingerMaxDimMm?.let { prefs[CALIBRATION_FINGER_KEY] = it }
             current.calibration.penMaxDimMm?.let { prefs[CALIBRATION_PEN_KEY] = it }
             current.calibration.palmMaxDimMm?.let { prefs[CALIBRATION_PALM_KEY] = it }
@@ -148,6 +151,11 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             enableFingerWriting = prefs[FINGER_WRITING_KEY] ?: true,
             autoConvertHandwritingToText = prefs[AUTO_CONVERT_HANDWRITING_KEY] ?: false,
             autoEraseEnabled = prefs[AUTO_ERASE_KEY] ?: false,
+            scribbleSensitivity = prefs[SCRIBBLE_SENSITIVITY_KEY]
+                ?.let { name: String ->
+                    com.vellum.notes.input.ScribbleSensitivity.entries.firstOrNull { it.name == name }
+                }
+                ?: com.vellum.notes.input.ScribbleSensitivity.BALANCED,
             palmZone = PalmZone(
                 mode = PalmZoneMode.entries.getOrNull(prefs[PALM_ZONE_MODE_KEY] ?: PalmZoneMode.AUTO.ordinal)
                     ?: PalmZoneMode.AUTO,

@@ -176,6 +176,7 @@ fun SettingsScreen(
                         this.sizeGrowthCancelThresholdMm = newSettings.sizeGrowthCancelThresholdMm
                         this.allowImmediateDrawWhenIsolated = newSettings.allowImmediateDrawWhenIsolated
                         this.debugOverlayEnabled = newSettings.debugOverlayEnabled
+                        this.scribbleSensitivity = newSettings.scribbleSensitivity
                     }
                 }
             })
@@ -211,6 +212,26 @@ fun SettingsContent(
                 checked = settings.enableFingerWriting,
                 onCheckedChange = { onSettingChange(settings.copy(enableFingerWriting = it)) },
             )
+        }
+
+        SettingsSectionDivider()
+        SettingsSectionTitle("Strike-out erase")
+
+        Text(
+            "Scribble back and forth over a word to erase the whole word. " +
+                "Choose how deliberate the strike-out pattern must be.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            com.vellum.notes.input.ScribbleSensitivity.entries.forEachIndexed { index, s ->
+                SegmentedButton(
+                    selected = settings.scribbleSensitivity == s,
+                    onClick = { onSettingChange(settings.copy(scribbleSensitivity = s)) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = com.vellum.notes.input.ScribbleSensitivity.entries.size),
+                ) { Text(s.name.lowercase().replaceFirstChar { it.uppercase() }) }
+            }
         }
 
         SettingsSectionDivider()

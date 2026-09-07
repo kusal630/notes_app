@@ -57,6 +57,12 @@ data class PalmRejectionSettings(
      * the heuristic because it only affects the current gesture.
      */
     var autoEraseEnabled: Boolean = false,
+    /**
+     * How eager the scribble (strike-out) detector is: SENSITIVE fires with fewer
+     * direction reversals (easier to trigger), RELAXED needs a clearly deliberate
+     * zigzag. The detected pattern then erases the whole struck-through word.
+     */
+    var scribbleSensitivity: ScribbleSensitivity = ScribbleSensitivity.BALANCED,
 
     // --- Resting-hand / palm rejection knobs (Task 1) -------------------------------
     /**
@@ -154,4 +160,16 @@ data class PalmRejectionSettings(
 
     fun effectiveRelaxedPalmMm(): Float =
         calibration.palmMaxDimMm ?: relaxedPalmMm
+}
+
+/** User-selectable aggressiveness of the strike-out-to-erase pattern detector. */
+enum class ScribbleSensitivity(
+    val minReversals: Int,
+    val minReversalsOnInk: Int,
+    val scribbleBoxMm: Float,
+    val maxDurationMs: Long,
+) {
+    RELAXED(minReversals = 5, minReversalsOnInk = 4, scribbleBoxMm = 28f, maxDurationMs = 3000L),
+    BALANCED(minReversals = 4, minReversalsOnInk = 3, scribbleBoxMm = 24f, maxDurationMs = 2500L),
+    SENSITIVE(minReversals = 3, minReversalsOnInk = 2, scribbleBoxMm = 20f, maxDurationMs = 2000L),
 }

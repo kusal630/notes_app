@@ -331,7 +331,7 @@ fun EditorScreen(
     }
 
     // Decoded image bitmaps for canvas rendering, keyed by fileRef.
-    val imageBitmapCache = remember(content.imageObjects.map { it.fileRef }) {
+    val imageBitmapCache = remember(content.imageObjects.map { it.fileRef }.joinToString("|")) {
         content.imageObjects.associate { im ->
             im.fileRef to runCatching {
                 BitmapFactory.decodeFile(File(uiContext.filesDir, im.fileRef).absolutePath)
@@ -606,6 +606,7 @@ fun EditorScreen(
                                 view.selectionBoundsMm = editorState!!.selectionBoundsMm
                                 view.listener = vm.canvasListener
                                 view.autoEraseEnabled = settings.autoEraseEnabled
+                                view.scribbleSensitivity = settings.scribbleSensitivity
                                 view.debugOverlayEnabled = settings.debugOverlayEnabled
                                 // Palm rest zone + scroll bar.
                                 view.palmZone = settings.palmZone

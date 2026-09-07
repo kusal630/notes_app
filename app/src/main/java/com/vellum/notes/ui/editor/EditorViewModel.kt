@@ -88,6 +88,9 @@ class EditorViewModel(
             _editor.value?.eraseAlong(x1, y1, x2, y2, radiusMm)
         }
 
+        override fun onScribbleWordErase(minX: Float, minY: Float, maxX: Float, maxY: Float, marginMm: Float) {
+            _editor.value?.eraseInRect(minX, minY, maxX, maxY, marginMm)        }
+
         override fun onEraseGestureEnd() {
             _editor.value?.eraseGestureEnd()
         }

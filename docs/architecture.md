@@ -2,7 +2,7 @@
 
 ## Overview
 
-Premium Notes is a production-quality handwriting note-taking application for Android
+Vellum is a production-quality handwriting note-taking application for Android
 tablets, optimized for passive/capacitive styluses and touch screens. The application is
 designed around a strict separation between raw platform input and the pure, testable
 core of input analysis, drawing, and document state.
@@ -19,13 +19,10 @@ The guiding rule of the whole project is:
 |---------------------|----------------------------------------------------|-----------|
 | Language            | Kotlin                                             | Android-first, coroutines, null safety |
 | UI                  | Jetpack Compose + Material 3                       | Tablet-adaptive layouts, recomposition control |
-| Drawing             | Android `Canvas`/`Path` on a dedicated canvas composable | Predictable, hardware accelerated, low latency |
-| Persistence         | Room (SQLite)                                      | Structured entities, transactional writes, migrations |
-| Serialization       | kotlinx.serialization JSON                         | Compact stroke blob serialization |
-| Async               | Coroutines + Flow                                  | Non-blocking persistence and loading |
-| DI                  | Manual application container (`AppContainer`)      | Zero magic, replaceable systems, testable |
-| PDF export          | Android `PdfDocument`                              | Vector-quality handwriting via `Path`, not screenshots |
-| PDF import          | Android `PdfRenderer`                              | Native, no extra dependency |
+| Drawing             | Android `Canvas`/`Path` on a dedicated `InkCanvasView`      | Predictable, hardware accelerated, low latency |
+| Persistence         | Room (SQLite) + kotlinx.serialization JSON                   | Structured entities + compact stroke blob serialization |
+| PDF export          | Android `PdfDocument`                                        | Vector-quality handwriting via `Path`, not screenshots |
+| PDF import          | Android `PdfRenderer`                                        | Native, no extra dependency |
 
 The dependency list is deliberately small. Every dependency has a reason; native
 platform APIs are preferred wherever they are sufficient.
