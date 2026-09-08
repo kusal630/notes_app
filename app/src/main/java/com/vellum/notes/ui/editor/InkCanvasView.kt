@@ -123,13 +123,66 @@ class InkCanvasView @JvmOverloads constructor(
 
     /** Image objects on the current page (rendered between paper and ink, in z-order). */
     var images: List<com.vellum.notes.model.ImageObject> = emptyList()
+        set(value) {
+            field = value
+            // Pre-sort once per assignment: onDraw used to sort every frame.
+            sortedImages = value.sortedBy { it.zOrder }
+            invalidate()
+        }
+
+    /** Images pre-sorted by z-order (see [images]); the draw path iterates this. */
+    private var sortedImages: List<com.vellum.notes.model.ImageObject> = emptyList()
 
     /** Committed text objects, drawn between images and ink. */
     var texts: List<com.vellum.notes.model.TextObject> = emptyList()
         set(value) {
             field = value
+            rebuildTextLayoutCache()
             invalidate()
         }
+
+    /**
+     * Word-wrapped lines per text id, rebuilt when [texts] changes so onDraw never
+     * splits/allocates per frame. Keyed by text id; ids are assigned by the editor
+     * state when the object is created.
+     */
+    private var textLinesCache: Map<Long, List<String>> = emptyMap()
+
+    /** Scratch paint for text measuring (cache build) and drawing (onDraw). */
+    private val scratchTextPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        isSubpixelText = true
+    }
+
+    /** Bounded typeface cache: one entry per (family, bold) pair actually on the page. */
+    private val typefaceCache = HashMap<Pair<String, Boolean>, android.graphics.Typeface>()
+
+    private fun typefaceFor(family: String, bold: Boolean): android.graphics.Typeface =
+        typefaceCache.getOrPut(family to bold) {
+            android.graphics.Typeface.create(
+                family,
+                if (bold) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
+            )
+        }
+
+    /** Rebuilds [textLinesCache] for the current [texts] (runs on assignment, not per frame). */
+    private fun rebuildTextLayoutCache() {
+        if (texts.isEmpty()) {
+            textLinesCache = emptyMap()
+            return
+        }
+        val cache = HashMap<Long, List<String>>(texts.size)
+        for (t in texts) {
+            if (t.text.isBlank()) continue
+            scratchTextPaint.textSize = t.fontSizeMm
+            scratchTextPaint.typeface = typefaceFor(t.fontFamily, t.bold)
+            cache[t.id] = com.vellum.notes.render.TextLayout.wrap(
+                t.text,
+                { s -> scratchTextPaint.measureText(s) },
+                t.width,
+            )
+        }
+        textLinesCache = cache
+    }
 
     /** Decoded bitmaps keyed by [com.vellum.notes.model.ImageObject.fileRef]. */
     var imageBitmaps: Map<String, android.graphics.Bitmap> = emptyMap()
@@ -142,6 +195,11 @@ class InkCanvasView @JvmOverloads constructor(
         }
 
     var penStyle: PenStyle = PenStyle()
+        set(value) {
+            field = value
+            // A style change mid-shape-drag updates the live preview immediately.
+            if (shapeStartWorld != null) refreshShapePreview()
+        }
     var tool: Tool = Tool.PEN
         set(value) {
             if (field != value) {
@@ -153,6 +211,10 @@ class InkCanvasView @JvmOverloads constructor(
         }
     var eraserSizeMm: Float = 6f
     var shapeKind: ShapeKind = ShapeKind.RECT
+        set(value) {
+            field = value
+            if (shapeStartWorld != null) refreshShapePreview()
+        }
 
     /**
      * When on (settings toggle, default off), a tight scribble over the page erases the
@@ -272,6 +334,43 @@ class InkCanvasView @JvmOverloads constructor(
         color = 0xFF000000.toInt()
     }
 
+    // --- palm zone paints (fields: onDraw used to allocate these every frame) ---
+    private val zoneFillPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = 0x1A2E5BFF.toInt()
+    }
+    private val zoneStrokePaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = 0x662E5BFF.toInt()
+    }
+    private val zoneLabelPaint = Paint().apply {
+        isAntiAlias = true
+        textSize = 14f
+        color = 0x882E5BFF.toInt()
+    }
+    private val zoneGripPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = 0xFF2E5BFF.toInt()
+        isAntiAlias = true
+    }
+    private val zoneGripInnerPaint = Paint().apply {
+        style = Paint.Style.FILL
+        color = 0xFFFFFFFF.toInt()
+        isAntiAlias = true
+    }
+    private val scrollTrackPaint = Paint().apply {
+        color = 0x14333333.toInt()
+    }
+    private val scrollThumbPaint = Paint().apply {
+        color = 0x662E5BFF.toInt()
+    }
+    private val clusterBoundsPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = 0xFF90A4AE.toInt()
+    }
+
     // --- active stroke ---
     private var strokeBuilder: StrokeBuilder? = null
 
@@ -287,6 +386,10 @@ class InkCanvasView @JvmOverloads constructor(
         val grainDx: Float,
         val grainDy: Float,
         val points: FloatArray,
+        /** Precomputed world-mm bounds (padded); used for viewport culling. */
+        val bounds: RectF,
+        /** Prebuilt second-pass paint for pencil grain; null for non-pencil strokes. */
+        val grainPaint: Paint?,
     )
 
     private data class CachedShape(
@@ -295,6 +398,8 @@ class InkCanvasView @JvmOverloads constructor(
         val fillPaint: Paint?,
         val corner0: Point,
         val corner1: Point,
+        /** Precomputed world-mm bounds (padded); used for viewport culling. */
+        val bounds: RectF,
     )
 
     private var displayStrokes: List<CachedStroke> = emptyList()
@@ -841,6 +946,34 @@ class InkCanvasView @JvmOverloads constructor(
 
     private var shapeStartWorld: Point? = null
     private var shapeCurrentWorld: Point? = null
+    /**
+     * Cached preview path for the in-progress shape drag, rebuilt on DOWN/MOVE so
+     * onDraw never allocates a scratch [ShapeObject] per frame while dragging.
+     */
+    private var shapePreviewPath: Path? = null
+    private var shapePreviewPaint: Paint? = null
+
+    /** Rebuilds [shapePreviewPath] from the current drag endpoints (or clears it). */
+    private fun refreshShapePreview() {
+        val start = shapeStartWorld
+        val current = shapeCurrentWorld
+        if (start == null || current == null) {
+            shapePreviewPath = null
+            shapePreviewPaint = null
+            return
+        }
+        val preview = ShapeObject(
+            id = -1L,
+            kind = shapeKind,
+            points = listOf(start, current),
+            x = start.x,
+            y = start.y,
+            strokeWidthMm = penStyle.widthMm,
+            colorArgb = penStyle.colorArgb,
+        )
+        shapePreviewPath = ShapeRenderer.buildPath(preview)
+        shapePreviewPaint = ShapeRenderer.outlinePaint(preview)
+    }
 
     private fun handleShapes(input: InputFrame, classified: ClassifiedFrame) {
         val contact = primaryContact(classified) ?: return
@@ -850,12 +983,14 @@ class InkCanvasView @JvmOverloads constructor(
             -> {
                 shapeStartWorld = Point(screenToWorldX(contact.contact.x), screenToWorldY(contact.contact.y))
                 shapeCurrentWorld = shapeStartWorld
+                refreshShapePreview()
                 invalidate()
             }
 
             com.vellum.notes.input.InputAction.MOVE -> {
                 if (shapeStartWorld != null) {
                     shapeCurrentWorld = Point(screenToWorldX(contact.contact.x), screenToWorldY(contact.contact.y))
+                    refreshShapePreview()
                     invalidate()
                 }
             }
@@ -868,6 +1003,7 @@ class InkCanvasView @JvmOverloads constructor(
                 val current = shapeCurrentWorld ?: start
                 shapeStartWorld = null
                 shapeCurrentWorld = null
+                refreshShapePreview()
                 val size = hypot(current.x - start.x, current.y - start.y)
                 if (size >= 2f) {
                     val shape = ShapeObject(
@@ -1249,6 +1385,9 @@ class InkCanvasView @JvmOverloads constructor(
         val grainAlpha = if (pencil) (paint.alpha * 0.5f).toInt() else 0
         val seed = (stroke.id * 7919L).toInt()
         val grainDx = 0.06f + (seed and 0x1F) * 0.002f
+        // Prebuilt second-pass paint for pencil grain: onDraw used to copy the paint
+        // per pencil stroke on every frame.
+        val grainPaint = if (pencil) Paint(paint).apply { alpha = grainAlpha } else null
         return CachedStroke(
             type = stroke.style.type,
             path = rp.path,
@@ -1258,6 +1397,11 @@ class InkCanvasView @JvmOverloads constructor(
             grainDx = grainDx,
             grainDy = grainDx * 0.5f,
             points = stroke.pointsPacked,
+            bounds = com.vellum.notes.render.StrokeCull.boundsOf(
+                stroke.pointsPacked,
+                com.vellum.notes.render.StrokeCull.padForWidth(stroke.style.widthMm),
+            ),
+            grainPaint = grainPaint,
         )
     }
 
@@ -1297,12 +1441,18 @@ class InkCanvasView @JvmOverloads constructor(
     private fun buildShapeGeometry(shape: ShapeObject): CachedShape {
         val c0 = shape.points.getOrNull(0) ?: Point(shape.x, shape.y)
         val c1 = shape.points.getOrNull(1) ?: Point(shape.x, shape.y)
+        val l = kotlin.math.min(c0.x, c1.x)
+        val t = kotlin.math.min(c0.y, c1.y)
+        val r = kotlin.math.max(c0.x, c1.x)
+        val b = kotlin.math.max(c0.y, c1.y)
+        val pad = com.vellum.notes.render.StrokeCull.padForWidth(shape.strokeWidthMm)
         return CachedShape(
             ShapeRenderer.buildPath(shape),
             ShapeRenderer.outlinePaint(shape),
             ShapeRenderer.fillPaint(shape),
             c0,
             c1,
+            RectF(l - pad, t - pad, r + pad, b + pad),
         )
     }
 
@@ -1331,7 +1481,7 @@ class InkCanvasView @JvmOverloads constructor(
 
     private fun drawCommittedStroke(canvas: Canvas, item: CachedStroke) {
         if (item.pencil) {
-            val grain = Paint(item.paint).apply { alpha = item.grainAlpha }
+            val grain = item.grainPaint ?: return
             canvas.drawPath(item.path, grain)
             canvas.save()
             canvas.translate(item.grainDx, item.grainDy)
@@ -1363,6 +1513,9 @@ class InkCanvasView @JvmOverloads constructor(
                 )
             },
         )
+        // World-space viewport clip, reused for culling every cached layer below.
+        val worldClip = worldClipRect
+        val cull = com.vellum.notes.render.StrokeCull
 
         // Committed content is drawn every frame from the cached display list, so the
         // whole page is always present at its world position — no bitmap layer to go
@@ -1371,15 +1524,24 @@ class InkCanvasView @JvmOverloads constructor(
         pdfBackground?.let { bmp ->
             if (!bmp.isRecycled) {
                 val (pdfW, pdfH) = com.vellum.notes.pdf.PdfImporter.worldSizeMm(bmp.width, bmp.height)
-                canvas.drawBitmap(
-                    bmp,
-                    android.graphics.Rect(0, 0, bmp.width, bmp.height),
-                    android.graphics.RectF(0f, 0f, pdfW, pdfH),
-                    null,
-                )
+                // Cull the full-page underlay when the viewport shows none of it.
+                if (worldClip.intersects(0f, 0f, pdfW, pdfH)) {
+                    canvas.drawBitmap(
+                        bmp,
+                        android.graphics.Rect(0, 0, bmp.width, bmp.height),
+                        android.graphics.RectF(0f, 0f, pdfW, pdfH),
+                        null,
+                    )
+                }
             }
         }
-        for (im in images.sortedBy { it.zOrder }) {
+        // Pre-sorted by z-order on assignment (see [sortedImages]); culled per rect.
+        for (im in sortedImages) {
+            if (im.x > worldClip.right || im.x + im.width < worldClip.left ||
+                im.y > worldClip.bottom || im.y + im.height < worldClip.top
+            ) {
+                continue
+            }
             val bmp = imageBitmaps[im.fileRef] ?: continue
             if (bmp.isRecycled) continue
             canvas.drawBitmap(
@@ -1390,31 +1552,30 @@ class InkCanvasView @JvmOverloads constructor(
             )
         }
         // Text objects: world-space boxes drawn between images and ink so ink and
-        // highlights stay on top, matching the documented z-order.
+        // highlights stay on top, matching the documented z-order. Lines are wrapped
+        // once per assignment (see [textLinesCache]); a scratch paint avoids per-frame
+        // allocation. Rotated boxes skip culling (axis-aligned test would be wrong).
         for (t in texts) {
             if (t.text.isBlank()) continue
-            val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                color = t.colorArgb.toInt()
-                textSize = t.fontSizeMm
-                typeface = if (t.bold) android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.BOLD)
-                           else android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.NORMAL)
-                isSubpixelText = true
+            if (t.rotation == 0f &&
+                (t.x > worldClip.right || t.x + t.width < worldClip.left ||
+                    t.y > worldClip.bottom || t.y + t.height < worldClip.top)
+            ) {
+                continue
             }
+            val textPaint = scratchTextPaint
+            textPaint.color = t.colorArgb.toInt()
+            textPaint.textSize = t.fontSizeMm
+            textPaint.typeface = typefaceFor(t.fontFamily, t.bold)
             canvas.save()
             canvas.rotate(t.rotation, t.x, t.y)
             // Simple word-wrap into the box width; lines flow downward from the top edge.
-            val maxW = t.width.coerceAtLeast(1f)
-            val lines = ArrayList<String>()
-            for (raw in t.text.split('\n')) {
-                var line = ""
-                for (word in raw.split(' ')) {
-                    val candidate = if (line.isEmpty()) word else "$line $word"
-                    if (textPaint.measureText(candidate) > maxW && line.isNotEmpty()) {
-                        lines += line; line = word
-                    } else line = candidate
-                }
-                lines += line
-            }
+            val lines = textLinesCache[t.id]
+                ?: com.vellum.notes.render.TextLayout.wrap(
+                    t.text,
+                    { s -> textPaint.measureText(s) },
+                    t.width,
+                )
             var y = t.y + t.fontSizeMm
             for (line in lines) {
                 canvas.drawText(line, t.x, y, textPaint)
@@ -1423,30 +1584,30 @@ class InkCanvasView @JvmOverloads constructor(
             canvas.restore()
         }
         for (item in displayStrokes) {
-            if (item.type == com.vellum.notes.model.PenType.HIGHLIGHTER) drawCommittedStroke(canvas, item)
+            if (item.type == com.vellum.notes.model.PenType.HIGHLIGHTER &&
+                cull.isVisible(item.bounds, worldClip)
+            ) {
+                drawCommittedStroke(canvas, item)
+            }
         }
         for (item in displayShapes) {
+            if (!cull.isVisible(item.bounds, worldClip)) continue
             item.fillPaint?.let { canvas.drawPath(item.path, it) }
             canvas.drawPath(item.path, item.paint)
         }
         for (item in displayStrokes) {
-            if (item.type != com.vellum.notes.model.PenType.HIGHLIGHTER) drawCommittedStroke(canvas, item)
+            if (item.type != com.vellum.notes.model.PenType.HIGHLIGHTER &&
+                cull.isVisible(item.bounds, worldClip)
+            ) {
+                drawCommittedStroke(canvas, item)
+            }
         }
 
-        // Live shape preview while dragging.
-        val shapeStart = shapeStartWorld
-        val shapeCurrent = shapeCurrentWorld
-        if (shapeStart != null && shapeCurrent != null) {
-            val preview = ShapeObject(
-                id = -1L,
-                kind = shapeKind,
-                points = listOf(shapeStart, shapeCurrent),
-                x = shapeStart.x,
-                y = shapeStart.y,
-                strokeWidthMm = penStyle.widthMm,
-                colorArgb = penStyle.colorArgb,
-            )
-            canvas.drawPath(ShapeRenderer.buildPath(preview), ShapeRenderer.outlinePaint(preview))
+        // Live shape preview while dragging (path cached on DOWN/MOVE, not per frame).
+        val previewPath = shapePreviewPath
+        val previewPaint = shapePreviewPaint
+        if (previewPath != null && previewPaint != null) {
+            canvas.drawPath(previewPath, previewPaint)
         }
 
         // Active stroke: rendered through the same renderer as committed strokes so the
@@ -1486,37 +1647,19 @@ class InkCanvasView @JvmOverloads constructor(
         // (contact-size based) and deliberately shows no box.
         syncPalmZoneRect()
         lastZoneRect?.let { zone ->
-            val zonePaint = Paint().apply {
-                style = Paint.Style.FILL
-                color = 0x1A2E5BFF.toInt()
-            }
-            val zoneStroke = Paint().apply {
-                style = Paint.Style.STROKE
-                strokeWidth = 2f
-                color = 0x662E5BFF.toInt()
-            }
-            canvas.drawRect(zone.leftPx, zone.topPx, zone.rightPx, zone.bottomPx, zonePaint)
-            canvas.drawRect(zone.leftPx, zone.topPx, zone.rightPx, zone.bottomPx, zoneStroke)
+            canvas.drawRect(zone.leftPx, zone.topPx, zone.rightPx, zone.bottomPx, zoneFillPaint)
+            canvas.drawRect(zone.leftPx, zone.topPx, zone.rightPx, zone.bottomPx, zoneStrokePaint)
             canvas.drawText(
                 "PALM REST",
                 zone.leftPx + 8f,
                 zone.topPx + 22f,
-                Paint().apply {
-                    textSize = 14f
-                    color = 0x882E5BFF.toInt()
-                }
+                zoneLabelPaint,
             )
             // Grip handle.
             val gx = zone.centerX()
             val gy = zone.topPx
-            canvas.drawCircle(gx, gy, 18f, Paint().apply {
-                style = Paint.Style.FILL
-                color = 0xFF2E5BFF.toInt()
-            })
-            canvas.drawCircle(gx, gy, 6f, Paint().apply {
-                style = Paint.Style.FILL
-                color = 0xFFFFFFFF.toInt()
-            })
+            canvas.drawCircle(gx, gy, 18f, zoneGripPaint)
+            canvas.drawCircle(gx, gy, 6f, zoneGripInnerPaint)
         }
 
         // Scroll bar: a thin track on the right edge with a thumb sized to the viewport.
@@ -1525,7 +1668,7 @@ class InkCanvasView @JvmOverloads constructor(
             val barLeft = w - scrollBarWidthPx
             canvas.drawRoundRect(
                 barLeft, 0f, w, h, 4f, 4f,
-                Paint().apply { color = 0x14333333.toInt() },
+                scrollTrackPaint,
             )
             val viewHeightMm = h / scale
             val topWorld = offsetY / scale
@@ -1533,7 +1676,7 @@ class InkCanvasView @JvmOverloads constructor(
             val thumbY = (topWorld / extentMm * h).coerceIn(0f, h - thumbH)
             canvas.drawRoundRect(
                 barLeft + 2f, thumbY, w - 2f, thumbY + thumbH, 6f, 6f,
-                Paint().apply { color = 0x662E5BFF.toInt() },
+                scrollThumbPaint,
             )
         }
 
@@ -1589,13 +1732,8 @@ class InkCanvasView @JvmOverloads constructor(
         }
         // Bounding boxes of resting clusters: visual confirmation that the whole hand (not
         // just one finger) is being treated as resting.
-        val boundsPaint = Paint().apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 2f
-            color = 0xFF90A4AE.toInt()
-        }
         for (bounds in frame.clusterBounds) {
-            canvas.drawRect(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, boundsPaint)
+            canvas.drawRect(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, clusterBoundsPaint)
         }
     }
 }
