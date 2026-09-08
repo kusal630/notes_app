@@ -69,7 +69,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -86,6 +85,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
@@ -259,11 +259,8 @@ fun EditorScreen(
     // Opening one shows the sidebar from the start (with a "record" hint) so the feature
     // is discoverable; a normal note only shows it once a recording is started.
     var isClassroom by remember { mutableStateOf(false) }
-    var notebookName by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(notebookId) {
-        val notebook = repository.getNotebook(notebookId)
-        isClassroom = notebook?.type == NoteType.CLASSROOM
-        notebookName = notebook?.title
+        isClassroom = repository.getNotebook(notebookId)?.type == NoteType.CLASSROOM
     }
 
     // --- Classroom Notes (Feature 2): on-device recording + transcript sidebar. ---
@@ -485,47 +482,30 @@ fun EditorScreen(
         )
     }
 
-    Scaffold(
-        topBar = {
-            EditorTopBar(
-                notebookId = notebookId,
-                notebookName = notebookName,
-                canUndo = editorState!!.canUndo,
-                canRedo = editorState!!.canRedo,
-                onUndo = { vm.undo() },
-                onRedo = { vm.redo() },
-                onBack = onBack,
-                onToggleRail = { showRail = !showRail },
-                onExportPdf = {
-                    scope.launch {
-                        val file = withContext(Dispatchers.IO) {
-                            PdfExporter.export(uiContext, pageId, content, pageBackground)
-                        }
-                        if (file != null) {
-                            val uri = FileProvider.getUriForFile(
-                                uiContext,
-                                "${uiContext.packageName}.fileprovider",
-                                file,
-                            )
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = "application/pdf"
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            uiContext.startActivity(Intent.createChooser(send, "Export PDF"))
-                        } else {
-                            Toast.makeText(uiContext, "PDF export failed", Toast.LENGTH_SHORT).show()
-                        }
+    Scaffold { padding ->
+        // Export-to-PDF action shared by the floating action pill.
+        val onExportPdf: () -> Unit = {
+            scope.launch {
+                val file = withContext(Dispatchers.IO) {
+                    PdfExporter.export(uiContext, pageId, content, pageBackground)
+                }
+                if (file != null) {
+                    val uri = FileProvider.getUriForFile(
+                        uiContext,
+                        "${uiContext.packageName}.fileprovider",
+                        file,
+                    )
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/pdf"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                },
-                isRecording = isRecording && recordingPageId == pageId,
-                onToggleClassroom = toggleClassroom,
-                transcriptAvailable = isClassroom,
-                onToggleTranscriptSidebar = { showTranscriptSidebar = !showTranscriptSidebar },
-                classroomEnabled = isClassroom,
-            )
-        },
-    ) { padding ->
+                    uiContext.startActivity(Intent.createChooser(send, "Export PDF"))
+                } else {
+                    Toast.makeText(uiContext, "PDF export failed", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
@@ -558,10 +538,22 @@ fun EditorScreen(
             }
 
             Column(Modifier.fillMaxSize()) {
-                // Nebo-style: tools live in a slim strip above the canvas — never
-                // under the palm at the bottom.
-                EditorToolbar(
+                // Floating pills up top (never under the palm at the bottom):
+                // navigation, tools and page actions hover over the canvas.
+                CanvasTopBar(
                     tool = tool,
+                    canUndo = editorState!!.canUndo,
+                    canRedo = editorState!!.canRedo,
+                    onUndo = { vm.undo() },
+                    onRedo = { vm.redo() },
+                    onBack = onBack,
+                    onToggleRail = { showRail = !showRail },
+                    onExportPdf = onExportPdf,
+                    isRecording = isRecording && recordingPageId == pageId,
+                    onToggleClassroom = toggleClassroom,
+                    transcriptAvailable = isClassroom,
+                    onToggleTranscriptSidebar = { showTranscriptSidebar = !showTranscriptSidebar },
+                    classroomEnabled = isClassroom,
                     penStyle = penStyle,
                     eraserSizeMm = eraserSize,
                     shapeKind = shapeKind,
@@ -679,9 +671,9 @@ fun EditorScreen(
                     classroomNotice?.let { notice ->
                         Surface(
                             modifier = Modifier
-                                .align(Alignment.TopCenter)
+                                .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
                             color = MaterialTheme.colorScheme.inverseSurface,
                             contentColor = MaterialTheme.colorScheme.inverseOnSurface,
                             shape = RoundedCornerShape(20.dp),
@@ -693,6 +685,38 @@ fun EditorScreen(
                             ) {
                                 Text(notice, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                                 TextButton(onClick = { classroomNotice = null }) { Text("Dismiss") }
+                            }
+                        }
+                    }
+                    // Left color rail: quick pen colors + widths hovering over the
+                    // canvas edge, clear of the writing hand.
+                    var paletteOpen by remember { mutableStateOf(false) }
+                    ColorRail(
+                        penStyle = penStyle,
+                        onColor = { color ->
+                            vm.setPenStyle(penStyle.copy(colorArgb = color))
+                        },
+                        onWidth = { w ->
+                            vm.setPenStyle(penStyle.copy(widthMm = w))
+                        },
+                        onOpenPalette = { paletteOpen = !paletteOpen },
+                        paletteOpen = paletteOpen,
+                        modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp),
+                    )
+                    if (paletteOpen) {
+                        Surface(
+                            modifier = Modifier.align(Alignment.CenterStart)
+                                .padding(start = 72.dp, end = 12.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            tonalElevation = 3.dp,
+                            shadowElevation = 2.dp,
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text("Colors", style = MaterialTheme.typography.labelMedium)
+                                Spacer(Modifier.height(6.dp))
+                                ColorRow(penStyle = penStyle, onColor = { color ->
+                                    vm.setPenStyle(penStyle.copy(colorArgb = color))
+                                })
                             }
                         }
                     }
@@ -772,73 +796,6 @@ fun EditorScreen(
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun EditorTopBar(
-    notebookId: Long,
-    notebookName: String?,
-    canUndo: Boolean,
-    canRedo: Boolean,
-    onUndo: () -> Unit,
-    onRedo: () -> Unit,
-    onBack: () -> Unit,
-    onToggleRail: () -> Unit,
-    onExportPdf: () -> Unit,
-    isRecording: Boolean,
-    onToggleClassroom: () -> Unit,
-    transcriptAvailable: Boolean,
-    onToggleTranscriptSidebar: () -> Unit,
-    classroomEnabled: Boolean,
-) {
-    TopAppBar(
-        title = {
-            Text(notebookName ?: "Notebook · ${notebookId}", fontWeight = FontWeight.SemiBold)
-        },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-        },
-        actions = {
-            IconButton(onClick = onToggleRail) {
-                Icon(Icons.Filled.Menu, contentDescription = "Show or hide pages")
-            }
-            IconButton(
-                onClick = onToggleTranscriptSidebar,
-                // Enabled whenever a transcript/classroom note exists so the sidebar can be
-                // reopened after being hidden.
-                enabled = transcriptAvailable,
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Article,
-                    contentDescription = "Show or hide transcript",
-                )
-            }
-            IconButton(onClick = onUndo, enabled = canUndo) {
-                Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
-            }
-            IconButton(onClick = onRedo, enabled = canRedo) {
-                Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
-            }
-            IconButton(onClick = onExportPdf) {
-                Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF")
-            }
-            IconButton(
-                onClick = onToggleClassroom,
-                enabled = classroomEnabled,
-                // When not a classroom note, the button is disabled but still visible
-                // so the user can discover the feature.
-            ) {
-                Icon(
-                    Icons.Filled.Mic,
-                    contentDescription = "Classroom Notes (record & transcribe)",
-                    tint = if (isRecording) MaterialTheme.colorScheme.error else LocalContentColor.current,
-                )
-            }
-        }
-    )
 }
 
 /**
@@ -1250,7 +1207,7 @@ private suspend fun scrollListToFraction(
 }
 
 @Composable
-private fun EditorToolbar(
+private fun CanvasTopBar(
     tool: Tool,
     penStyle: PenStyle,
     eraserSizeMm: Float,
@@ -1278,9 +1235,20 @@ private fun EditorToolbar(
     onSmoothSelection: () -> Unit = {},
     canConvert: Boolean = false,
     onConvertSelection: () -> Unit = {},
+    canUndo: Boolean = false,
+    canRedo: Boolean = false,
+    onUndo: () -> Unit = {},
+    onRedo: () -> Unit = {},
+    onBack: () -> Unit = {},
+    onToggleRail: () -> Unit = {},
+    onExportPdf: () -> Unit = {},
+    isRecording: Boolean = false,
+    onToggleClassroom: () -> Unit = {},
+    transcriptAvailable: Boolean = false,
+    onToggleTranscriptSidebar: () -> Unit = {},
+    classroomEnabled: Boolean = false,
 ) {
-    // Nebo pattern: a slim always-visible strip; tapping the active
-    // pen/highlighter/eraser/shapes tool toggles its settings panel.
+    // Tapping the active pen/highlighter/eraser/shapes tool toggles its settings panel.
     var pickerOpen by remember { mutableStateOf(true) }
     fun stripClick(t: Tool) {
         if (t == tool && (t == Tool.PEN || t == Tool.HIGHLIGHTER || t == Tool.ERASER || t == Tool.SHAPES)) {
@@ -1291,16 +1259,47 @@ private fun EditorToolbar(
         }
     }
     val showPicker = pickerOpen && (tool == Tool.PEN || tool == Tool.HIGHLIGHTER || tool == Tool.ERASER || tool == Tool.SHAPES)
-    Surface(tonalElevation = 2.dp) {
-        Column(Modifier.fillMaxWidth()) {
-            // Primary tool strip.
-            Row(
-                modifier = Modifier
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+    Column(Modifier.fillMaxWidth()) {
+        // Floating pills hovering over the canvas: navigation, tools, actions.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 3.dp,
+                shadowElevation = 2.dp,
             ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                    IconButton(onClick = onUndo, enabled = canUndo) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                    }
+                    IconButton(onClick = onRedo, enabled = canRedo) {
+                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                    }
+                }
+            }
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 3.dp,
+                shadowElevation = 2.dp,
+            ) {
+                // Primary tool strip.
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                 ToolButton(
                     label = "Pen",
                     selected = tool == Tool.PEN,
@@ -1358,11 +1357,55 @@ private fun EditorToolbar(
                     onClick = onAutoEraseToggle,
                     content = { Icon(Icons.Filled.AutoFixHigh, contentDescription = "Auto-erase") },
                 )
+                }
             }
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                tonalElevation = 3.dp,
+                shadowElevation = 2.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onToggleRail) {
+                        Icon(Icons.Filled.Menu, contentDescription = "Show or hide pages")
+                    }
+                    IconButton(onClick = onExportPdf) {
+                        Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF")
+                    }
+                    IconButton(
+                        onClick = onToggleClassroom,
+                        enabled = classroomEnabled,
+                    ) {
+                        Icon(
+                            Icons.Filled.Mic,
+                            contentDescription = "Classroom Notes (record & transcribe)",
+                            tint = if (isRecording) MaterialTheme.colorScheme.error
+                            else LocalContentColor.current,
+                        )
+                    }
+                    IconButton(
+                        onClick = onToggleTranscriptSidebar,
+                        enabled = transcriptAvailable,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Article,
+                            contentDescription = "Show or hide transcript",
+                        )
+                    }
+                }
+            }
+        }
 
-            // Context panel: settings for the active tool, or selection actions.
-            if (showPicker || tool == Tool.SELECT) {
-                HorizontalDivider()
+        // Context panel: settings for the active tool, or selection actions.
+        if (showPicker || tool == Tool.SELECT) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                shape = RoundedCornerShape(20.dp),
+                tonalElevation = 3.dp,
+                shadowElevation = 2.dp,
+            ) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
                     when (tool) {
                 Tool.PEN, Tool.HIGHLIGHTER -> {
@@ -1660,3 +1703,97 @@ private fun DisabledToolButton(
 }
 
 private fun Long.toColor(): Color = Color(this)
+
+/** Quick pen colors + widths on a floating rail at the canvas edge. */
+private val RAIL_COLORS = listOf(0xFF000000L, 0xFF1565C0L, 0xFFD32F2F)
+
+private val RAIL_WIDTHS_MM = listOf(0.5f, 2.0f)
+
+private val RAINBOW_BRUSH = Brush.sweepGradient(
+    listOf(
+        Color.Red, Color(0xFFFF9800), Color(0xFFFDD835), Color(0xFF43A047),
+        Color(0xFF00ACC1), Color(0xFF3F51B5), Color(0xFF8E24AA), Color.Red,
+    )
+)
+
+@Composable
+private fun ColorRail(
+    penStyle: PenStyle,
+    onColor: (Long) -> Unit,
+    onWidth: (Float) -> Unit,
+    onOpenPalette: () -> Unit,
+    paletteOpen: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(28.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 2.dp,
+    ) {
+        Column(
+            Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            RAIL_COLORS.forEach { color ->
+                RailDot(
+                    selected = penStyle.colorArgb == color,
+                    onClick = { onColor(color) },
+                ) {
+                    Box(Modifier.size(28.dp).clip(CircleShape).background(Color(color)))
+                }
+            }
+            // Full palette opener.
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(RAINBOW_BRUSH)
+                    .border(
+                        width = if (paletteOpen) 3.dp else 1.dp,
+                        color = if (paletteOpen) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant,
+                        shape = CircleShape,
+                    )
+                    .clickable(onClick = onOpenPalette),
+            )
+            HorizontalDivider(Modifier.width(24.dp))
+            RAIL_WIDTHS_MM.forEach { w ->
+                RailDot(
+                    selected = kotlin.math.abs(penStyle.widthMm - w) < 0.2f,
+                    onClick = { onWidth(w) },
+                ) {
+                    Box(
+                        Modifier.size((10 + w * 6).toInt().coerceAtMost(26).dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.onSurface)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RailDot(
+    selected: Boolean,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .border(
+                width = if (selected) 3.dp else 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.outlineVariant,
+                shape = CircleShape,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}

@@ -851,26 +851,9 @@ class InkCanvasView @JvmOverloads constructor(
                             writingPointerId = writingId
                             builder = b
                         }
-                        // Auto-scroll (page scrolling): keep the pen away from the top and
-                        // bottom viewport edges so writing flows like a real notebook instead
-                        // of forcing the user to create a new page. The world point for THIS
-                        // event is computed before scrolling, so strokes stay continuous.
-                        // Deadband + clamp (ViewportScroll): without them the page bounced
-                        // up and down around the margin and could scroll past the content.
-                        val h = height.toFloat()
-                        val shiftY = com.vellum.notes.editor.ViewportScroll.shiftFor(
-                            penYPx = contact.contact.y,
-                            heightPx = h,
-                        )
-                        if (shiftY != 0f) {
-                            offsetY = com.vellum.notes.editor.ViewportScroll.clampOffset(
-                                offsetPx = offsetY - shiftY,
-                                extentMm = contentExtentMm(),
-                                scale = scale,
-                                heightPx = h,
-                            )
-                            listener?.onViewportChanged(zoom, offsetX, offsetY)
-                        }
+                        // No auto-scroll: the page stays where the user put it (pan/zoom
+                        // and the scroll bar move the viewport instead). The world point
+                        // for THIS event is computed directly, so strokes stay continuous.
                         val worldX = screenToWorldX(contact.contact.x)
                         val worldY = screenToWorldY(contact.contact.y)
                         // Coalesced history samples (older first) carry the pointer motion
@@ -914,21 +897,17 @@ class InkCanvasView @JvmOverloads constructor(
                         }
                         extendDirty(worldX, worldY)
                         if (changed) {
-                            if (shiftY != 0f) {
-                                invalidate()
-                            } else {
-                                val pad = com.vellum.notes.render.DirtyRect.padForWidth(
-                                    builder.style.widthMm,
-                                )
-                                val dirty = com.vellum.notes.render.DirtyRect.segment(
-                                    dirtyL, dirtyT, dirtyR, dirtyB,
-                                    scale, offsetX, offsetY, pad,
-                                )
-                                invalidate(
-                                    (dirty.left - 2f).toInt(), (dirty.top - 2f).toInt(),
-                                    (dirty.right + 2f).toInt(), (dirty.bottom + 2f).toInt(),
-                                )
-                            }
+                            val pad = com.vellum.notes.render.DirtyRect.padForWidth(
+                                builder.style.widthMm,
+                            )
+                            val dirty = com.vellum.notes.render.DirtyRect.segment(
+                                dirtyL, dirtyT, dirtyR, dirtyB,
+                                scale, offsetX, offsetY, pad,
+                            )
+                            invalidate(
+                                (dirty.left - 2f).toInt(), (dirty.top - 2f).toInt(),
+                                (dirty.right + 2f).toInt(), (dirty.bottom + 2f).toInt(),
+                            )
                         }
                         // Feature 1: a deliberate tight scribble flips THIS gesture to
                         // erase. The partial stroke is committed (not lost), the erase
