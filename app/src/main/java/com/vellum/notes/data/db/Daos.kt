@@ -13,10 +13,21 @@ interface NotebookDao {
         """
         SELECT n.*, (SELECT COUNT(*) FROM pages p WHERE p.notebookId = n.id) AS pageCount
         FROM notebooks n
+        WHERE n.deletedAt IS NULL
         ORDER BY n.isArchived ASC, n.updatedAt DESC
         """
     )
     fun observeNotebooks(): Flow<List<NotebookRow>>
+
+    @Query(
+        """
+        SELECT n.*, (SELECT COUNT(*) FROM pages p WHERE p.notebookId = n.id) AS pageCount
+        FROM notebooks n
+        WHERE n.deletedAt IS NOT NULL
+        ORDER BY n.deletedAt DESC
+        """
+    )
+    fun observeTrashed(): Flow<List<NotebookRow>>
 
     @Insert
     suspend fun insert(notebook: NotebookEntity): Long
@@ -39,11 +50,55 @@ interface NotebookDao {
     @Query("UPDATE notebooks SET defaultTemplate = :templateId, updatedAt = :now WHERE id = :id")
     suspend fun setDefaultTemplate(id: Long, templateId: String, now: Long = System.currentTimeMillis())
 
+    @Query("UPDATE notebooks SET categoryId = :categoryId, updatedAt = :now WHERE id = :id")
+    suspend fun setCategory(id: Long, categoryId: Long?, now: Long = System.currentTimeMillis())
+
+    /** Unfiles every notebook in a deleted category (they are never deleted). */
+    @Query("UPDATE notebooks SET categoryId = NULL WHERE categoryId = :categoryId")
+    suspend fun clearCategory(categoryId: Long)
+
+    /** Soft delete: flags the notebook; pages stay untouched until permanent deletion cascades. */
+    @Query("UPDATE notebooks SET deletedAt = :now, updatedAt = :now WHERE id = :id")
+    suspend fun trash(id: Long, now: Long = System.currentTimeMillis())
+
+    /** Restores a trashed notebook. */
+    @Query("UPDATE notebooks SET deletedAt = NULL, updatedAt = :now WHERE id = :id")
+    suspend fun restore(id: Long, now: Long = System.currentTimeMillis())
+
     @Query("DELETE FROM notebooks WHERE id = :id")
     suspend fun delete(id: Long)
 
+    @Query("DELETE FROM notebooks WHERE deletedAt IS NOT NULL")
+    suspend fun emptyTrash()
+
     @Query("SELECT * FROM notebooks WHERE id = :id")
     suspend fun get(id: Long): NotebookEntity?
+}
+
+@Dao
+interface CategoryDao {
+
+    @Query(
+        """
+        SELECT c.*, (SELECT COUNT(*) FROM notebooks n
+                     WHERE n.categoryId = c.id AND n.deletedAt IS NULL) AS notebookCount
+        FROM categories c
+        ORDER BY c.name COLLATE NOCASE ASC
+        """
+    )
+    fun observeCategories(): Flow<List<CategoryRow>>
+
+    @Insert
+    suspend fun insert(category: CategoryEntity): Long
+
+    @Query("UPDATE categories SET name = :name WHERE id = :id")
+    suspend fun rename(id: Long, name: String)
+
+    @Query("SELECT * FROM categories WHERE id = :id")
+    suspend fun get(id: Long): CategoryEntity?
+
+    @Query("DELETE FROM categories WHERE id = :id")
+    suspend fun delete(id: Long)
 }
 
 @Dao

@@ -11,13 +11,13 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | Area | What you get |
 |---|---|
 | ✍️ Handwriting | Low-latency ink, pen + highlighter, 6 pen styles, one-tap **Smooth** cleanup |
-| 🌴 Palm rejection | Passive-stylus + finger engine: write with your palm resting — second-touch handoff, palm-sized lock rescue, writing-hand posture (right/left/two-handed edge bias), Low/Med/High sensitivity presets, saturated-pressure palm confirmation, per-device calibration + Labs screen |
+| 🌴 Palm rejection | Passive-stylus + finger engine: write with your palm resting — second-touch handoff, palm-sized lock rescue, writing-hand posture (right/left/two-handed edge bias), Low/Med/High sensitivity presets, saturated-pressure palm confirmation, per-device calibration + Labs screen. Acceptance-tested: palm-first, mid-stroke palm, no-palm, and continued writing all keep inking |
 | 🧰 Toolbar | Nebo-style slim top strip (icon-only 48dp) — tap the active pen to toggle its colors & thickness |
 | 🔤 Text & images | Text boxes (insert + edit), photo insertion, move / resize / duplicate |
 | 🔷 Shapes | Line, arrow, rect, circle, ellipse, triangle, star, hexagon — select, move, resize |
 | 📄 Pages | Multi-page notebooks, page rail, long-press **duplicate / delete**, templates per notebook + per page |
 | 📚 Paper | 11 templates (ruled, grid, dotted, graph, Cornell, music, math…), 10 premium covers incl. Aurum Gold |
-| 🔍 Organize | Home **search**, Recent / A–Z sort, favorites-first + favorites filter |
+| 🔍 Organize | Noteshelf home (sidebar + categories, Starred/Unfiled/Trash/Archived), Quick Note, search, Recent / A–Z sort |
 | 💾 Backup | One-tap local ZIP export (database + images + PDF pages) to your own folder — no cloud |
 | 📥 PDF | Import & annotate any PDF offline; export preserves italic/underline/alignment; reader themes + auto-trim coming |
 | 🎙️ Classroom | Optional on-device recording with live Vosk transcription + summary, saved with the note |

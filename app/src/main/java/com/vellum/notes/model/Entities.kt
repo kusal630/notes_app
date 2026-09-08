@@ -18,9 +18,19 @@ data class Notebook(
     val defaultTemplate: String = "BLANK",
     val isFavorite: Boolean = false,
     val isArchived: Boolean = false,
+    /** Owning category id, or null for Unfiled. */
+    val categoryId: Long? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val pageCount: Int = 0,
+)
+
+/** A user-defined notebook category (Noteshelf sidebar). */
+data class Category(
+    val id: Long = 0L,
+    val name: String,
+    /** Live count of non-trashed notebooks in this category. */
+    val notebookCount: Int = 0,
 )
 
 /** Catalog-level page record. */

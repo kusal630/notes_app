@@ -1,5 +1,6 @@
 package com.vellum.notes.data
 
+import com.vellum.notes.model.Category
 import com.vellum.notes.model.Notebook
 import com.vellum.notes.model.NoteType
 import com.vellum.notes.model.PageContent
@@ -21,12 +22,29 @@ interface NotesRepository {
         defaultTemplate: String = "BLANK",
     ): Long
     suspend fun renameNotebook(id: Long, title: String)
+    /** Soft delete: moves the notebook to Trash (restorable). */
     suspend fun deleteNotebook(id: Long)
+    /** Restores a trashed notebook. */
+    suspend fun restoreNotebook(id: Long)
+    /** Permanent deletion (pages cascade). Only Trash and failed imports use this. */
+    suspend fun deleteNotebookPermanently(id: Long)
+    /** Permanently deletes everything in Trash. */
+    suspend fun emptyTrash()
+    /** Trashed notebooks, newest first. */
+    val trashedNotebooks: Flow<List<Notebook>>
     suspend fun duplicateNotebook(id: Long): Long
     suspend fun toggleFavorite(id: Long)
     suspend fun setArchived(id: Long, archived: Boolean)
     suspend fun setNotebookCover(id: Long, coverId: String)
     suspend fun setNotebookDefaultTemplate(id: Long, templateId: String)
+    suspend fun setNotebookCategory(id: Long, categoryId: Long?)
+
+    /** User-defined categories with live notebook counts, sorted A–Z. */
+    val categories: Flow<List<Category>>
+    suspend fun createCategory(name: String): Long
+    suspend fun renameCategory(id: Long, name: String)
+    /** Deletes a category; its notebooks become Unfiled (never deleted). */
+    suspend fun deleteCategory(id: Long)
 
     fun pagesFor(notebookId: Long): Flow<List<PageSummary>>
     suspend fun createPage(

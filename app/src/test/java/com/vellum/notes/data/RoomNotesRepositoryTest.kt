@@ -144,8 +144,13 @@ class RoomNotesRepositoryTest {
         val nb = repo.createNotebook("Temp")
         val pageId = repo.createPage(nb)
         repo.savePageContent(pageId, PageContent())
+        // Soft delete moves to Trash; pages survive until permanent deletion.
         repo.deleteNotebook(nb)
         assertEquals(0, repo.notebooks.first().size)
+        assertEquals(1, repo.trashedNotebooks.first().size)
+        assertTrue(repo.loadPageContent(pageId) != null)
+        repo.deleteNotebookPermanently(nb)
+        assertTrue(repo.trashedNotebooks.first().isEmpty())
         assertTrue(repo.loadPageContent(pageId) == null)
     }
 }

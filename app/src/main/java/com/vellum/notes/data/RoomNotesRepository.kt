@@ -2,9 +2,11 @@ package com.vellum.notes.data
 
 import android.content.Context
 import com.vellum.notes.data.db.AppDatabase
+import com.vellum.notes.data.db.CategoryEntity
 import com.vellum.notes.data.db.NotebookEntity
 import com.vellum.notes.data.db.PageDao
 import com.vellum.notes.data.db.PageEntity
+import com.vellum.notes.model.Category
 import com.vellum.notes.model.Notebook
 import com.vellum.notes.model.NoteType
 import com.vellum.notes.model.PageBackground
@@ -25,6 +27,7 @@ class RoomNotesRepository(private val db: AppDatabase) : NotesRepository {
 
     private val notebookDao = db.notebookDao()
     private val pageDao: PageDao = db.pageDao()
+    private val categoryDao = db.categoryDao()
 
     /** Flushes the WAL into the db file so a file-level backup is consistent. */
     suspend fun checkpoint() {
@@ -57,7 +60,52 @@ class RoomNotesRepository(private val db: AppDatabase) : NotesRepository {
         notebookDao.rename(id, title)
 
     override suspend fun deleteNotebook(id: Long) =
+        notebookDao.trash(id)
+
+    override suspend fun restoreNotebook(id: Long) =
+        notebookDao.restore(id)
+
+    override suspend fun deleteNotebookPermanently(id: Long) =
         notebookDao.delete(id)
+
+    override suspend fun emptyTrash() =
+        notebookDao.emptyTrash()
+
+    override val trashedNotebooks: Flow<List<Notebook>> =
+        notebookDao.observeTrashed().map { rows ->
+            rows.map { it.notebook.toModel(pageCount = it.pageCount) }
+        }
+
+    override suspend fun setNotebookCategory(id: Long, categoryId: Long?) {
+        // Dropping a notebook into a missing category would orphan it: fall back
+        // to Unfiled instead.
+        val resolved = categoryId?.takeIf { categoryDao.get(it) != null }
+        notebookDao.setCategory(id, resolved)
+    }
+
+    override val categories: Flow<List<Category>> =
+        categoryDao.observeCategories().map { rows ->
+            rows.map { Category(id = it.category.id, name = it.category.name, notebookCount = it.notebookCount) }
+        }
+
+    override suspend fun createCategory(name: String): Long {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "Category name must not be blank" }
+        return categoryDao.insert(CategoryEntity(name = trimmed))
+    }
+
+    override suspend fun renameCategory(id: Long, name: String) {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "Category name must not be blank" }
+        categoryDao.rename(id, trimmed)
+    }
+
+    override suspend fun deleteCategory(id: Long) {
+        categoryDao.delete(id)
+        // Notebooks have no FK to categories, so unfile explicitly: everything
+        // that pointed at the deleted category becomes Unfiled.
+        notebookDao.clearCategory(id)
+    }
 
     override suspend fun duplicateNotebook(id: Long): Long {
         val src = notebookDao.get(id) ?: return -1L
@@ -169,6 +217,7 @@ class RoomNotesRepository(private val db: AppDatabase) : NotesRepository {
             defaultTemplate = defaultTemplate.ifBlank { "BLANK" },
             isFavorite = isFavorite,
             isArchived = isArchived,
+            categoryId = categoryId,
             createdAt = createdAt,
             updatedAt = updatedAt,
             pageCount = pageCount,

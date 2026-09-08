@@ -6,14 +6,15 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [NotebookEntity::class, PageEntity::class],
-    version = 3,
+    entities = [NotebookEntity::class, PageEntity::class, CategoryEntity::class],
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun notebookDao(): NotebookDao
     abstract fun pageDao(): PageDao
+    abstract fun categoryDao(): CategoryDao
 
     companion object {
         @Volatile
@@ -26,7 +27,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "vellum.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }
@@ -46,6 +47,21 @@ abstract class AppDatabase : RoomDatabase() {
             db.execSQL("ALTER TABLE pages ADD COLUMN templateId TEXT NOT NULL DEFAULT 'BLANK'")
             db.execSQL("ALTER TABLE pages ADD COLUMN pdfPageIndex INTEGER NOT NULL DEFAULT -1")
             db.execSQL("ALTER TABLE pages ADD COLUMN pdfBackgroundPath TEXT NOT NULL DEFAULT ''")
+        }
+
+        /**
+         * v3 → v4: Noteshelf organization. Notebooks gain an optional category and a
+         * trash flag; a new categories table holds user-defined shelves. All
+         * additive; existing notebooks land in Unfiled, nothing is trashed.
+         */
+        val MIGRATION_3_4 = androidx.room.migration.Migration(3, 4) { db ->
+            db.execSQL("ALTER TABLE notebooks ADD COLUMN categoryId INTEGER")
+            db.execSQL("ALTER TABLE notebooks ADD COLUMN deletedAt INTEGER")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS categories " +
+                    "(`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`name` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)"
+            )
         }
     }
 }
