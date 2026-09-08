@@ -474,4 +474,55 @@ class PalmRejectionRegressionTest {
             assertNull("dragged palm must never take the lock", last.activeWritingPointerId)
         }
     }
+
+    // --- (i) palm resting, then finger writes: no dead window -------------------
+
+    @Test
+    fun palmRestingThenFingerWritesImmediately() {
+        val e = engine()
+        val palmFirst = e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.palm(2, timeMs = 0L)), added = 2)
+        )
+        assertNull(palmFirst.activeWritingPointerId)
+
+        // Fingertip joins while the palm rests: it must claim the lock on the DOWN
+        // frame itself — previously it waited for tracker promotion and the user
+        // wrote with no ink appearing.
+        val out = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 20L,
+                listOf(
+                    TestTouchFactory.palm(2, x = 500f, y = 700f, timeMs = 20L),
+                    TestTouchFactory.fingertip(1, x = 200f, y = 200f, timeMs = 20L),
+                ),
+                added = 1,
+            )
+        )
+        assertEquals(1, out.activeWritingPointerId)
+        assertTrue(out.gesturePointerIds.isEmpty())
+        // Palm stays rejected while the finger writes.
+        assertEquals(ContactClassification.PALM, out.contactFor(2)?.classification)
+    }
+
+    @Test
+    fun secondFingerWithoutRestingPalmDoesNotStealLock() {
+        val e = engine()
+        e.process(
+            TestTouchFactory.frame(InputAction.DOWN, 0L, listOf(TestTouchFactory.fingertip(1, timeMs = 0L)), added = 1)
+        )
+        // No palm down — the second finger must NOT claim the lock, so the pair can
+        // still drive pan/zoom gestures.
+        val out = e.process(
+            TestTouchFactory.frame(
+                InputAction.POINTER_DOWN, 20L,
+                listOf(
+                    TestTouchFactory.fingertip(1, x = 200f, y = 200f, timeMs = 20L),
+                    TestTouchFactory.fingertip(3, x = 400f, y = 400f, timeMs = 20L),
+                ),
+                added = 3,
+            )
+        )
+        assertNull(out.activeWritingPointerId)
+        assertTrue(out.gesturePointerIds.containsAll(listOf(1, 3)))
+    }
 }

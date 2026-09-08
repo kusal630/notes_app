@@ -521,73 +521,6 @@ fun EditorScreen(
                 classroomEnabled = isClassroom,
             )
         },
-        bottomBar = {
-            EditorToolbar(
-                tool = tool,
-                penStyle = penStyle,
-                eraserSizeMm = eraserSize,
-                shapeKind = shapeKind,
-                settings = settings,
-                selectedCount = selectedIds.size,
-                onTool = { t ->
-                    vm.setTool(t)
-                    if (t != Tool.SELECT) vm.clearSelection()
-                    when (t) {
-                        Tool.HIGHLIGHTER -> if (penStyle.type != PenType.HIGHLIGHTER) {
-                            // Remember the user's ink pen so switching back restores it.
-                            editorState!!.saveInkStyle()
-                            vm.setPenStyle(penStyle.copy(type = PenType.HIGHLIGHTER, opacity = 0.4f, widthMm = 5f))
-                        }
-                        Tool.PEN -> editorState!!.restoreInkStyle()
-                        else -> Unit
-                    }
-                },
-                onShapeKind = { vm.setShapeKind(it) },
-                onColor = { color ->
-                    vm.setPenStyle(penStyle.copy(colorArgb = color))
-                },
-                onWidth = { w ->
-                    vm.setPenStyle(penStyle.copy(widthMm = w))
-                },
-                onPenType = { type ->
-                    vm.setPenStyle(
-                        penStyle.copy(
-                            type = type,
-                            opacity = if (type == PenType.HIGHLIGHTER) 0.4f else 1f,
-                        )
-                    )
-                },
-                onEraserSize = { vm.setEraserSize(it) },
-                onSelectAll = { vm.selectAll() },
-                onDeleteSelection = { vm.deleteSelection() },
-                onDuplicateSelection = { vm.duplicateSelection() },
-                onSmoothingChange = { mode ->
-                    scope.launch {
-                        app.container.settingsRepository.updateSettings { this.smoothing = mode }
-                    }
-                },
-                autoEraseEnabled = settings.autoEraseEnabled,
-                onAutoEraseToggle = {
-                    scope.launch {
-                        app.container.settingsRepository.updateSettings {
-                            autoEraseEnabled = !autoEraseEnabled
-                        }
-                    }
-                },
-                onInsertText = { showTextDialog = true },
-                onInsertImage = {
-                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                },
-                onPickTemplate = { showTemplateDialog = true },
-                canEditText = selectedIds.size == 1 &&
-                    content.textObjects.any { it.id in selectedIds },
-                onEditText = {
-                    selectedIds.firstOrNull()?.let { editingTextId = it }
-                },
-                canSmooth = content.strokes.any { it.id in selectedIds },
-                onSmoothSelection = { vm.smoothSelection() },
-            )
-        }
     ) { padding ->
         BoxWithConstraints(
             Modifier
@@ -620,7 +553,74 @@ fun EditorScreen(
                 showTranscriptSidebar = false
             }
 
-            Row(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                // Nebo-style: tools live in a slim strip above the canvas — never
+                // under the palm at the bottom.
+                EditorToolbar(
+                    tool = tool,
+                    penStyle = penStyle,
+                    eraserSizeMm = eraserSize,
+                    shapeKind = shapeKind,
+                    settings = settings,
+                    selectedCount = selectedIds.size,
+                    onTool = { t ->
+                        vm.setTool(t)
+                        if (t != Tool.SELECT) vm.clearSelection()
+                        when (t) {
+                            Tool.HIGHLIGHTER -> if (penStyle.type != PenType.HIGHLIGHTER) {
+                                editorState!!.saveInkStyle()
+                                vm.setPenStyle(penStyle.copy(type = PenType.HIGHLIGHTER, opacity = 0.4f, widthMm = 5f))
+                            }
+                            Tool.PEN -> editorState!!.restoreInkStyle()
+                            else -> Unit
+                        }
+                    },
+                    onShapeKind = { vm.setShapeKind(it) },
+                    onColor = { color ->
+                        vm.setPenStyle(penStyle.copy(colorArgb = color))
+                    },
+                    onWidth = { w ->
+                        vm.setPenStyle(penStyle.copy(widthMm = w))
+                    },
+                    onPenType = { type ->
+                        vm.setPenStyle(
+                            penStyle.copy(
+                                type = type,
+                                opacity = if (type == PenType.HIGHLIGHTER) 0.4f else 1f,
+                            )
+                        )
+                    },
+                    onEraserSize = { vm.setEraserSize(it) },
+                    onSelectAll = { vm.selectAll() },
+                    onDeleteSelection = { vm.deleteSelection() },
+                    onDuplicateSelection = { vm.duplicateSelection() },
+                    onSmoothingChange = { mode ->
+                        scope.launch {
+                            app.container.settingsRepository.updateSettings { this.smoothing = mode }
+                        }
+                    },
+                    autoEraseEnabled = settings.autoEraseEnabled,
+                    onAutoEraseToggle = {
+                        scope.launch {
+                            app.container.settingsRepository.updateSettings {
+                                autoEraseEnabled = !autoEraseEnabled
+                            }
+                        }
+                    },
+                    onInsertText = { showTextDialog = true },
+                    onInsertImage = {
+                        imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    },
+                    onPickTemplate = { showTemplateDialog = true },
+                    canEditText = selectedIds.size == 1 &&
+                        content.textObjects.any { it.id in selectedIds },
+                    onEditText = {
+                        selectedIds.firstOrNull()?.let { editingTextId = it }
+                    },
+                    canSmooth = content.strokes.any { it.id in selectedIds },
+                    onSmoothSelection = { vm.smoothSelection() },
+                )
+                Row(Modifier.weight(1f).fillMaxWidth()) {
                 // Canvas fills the whole screen so you can write edge to edge; the page
                 // rail is a hideable overlay toggled from the top bar. Keying by pageId
                 // recreates the view on page switch so the engine resets and any
@@ -670,9 +670,8 @@ fun EditorScreen(
                         Surface(
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
-                                .padding(12.dp)
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
                             color = MaterialTheme.colorScheme.inverseSurface,
                             contentColor = MaterialTheme.colorScheme.inverseOnSurface,
                             shape = RoundedCornerShape(20.dp),
@@ -758,6 +757,7 @@ fun EditorScreen(
                         modifier = Modifier.width(1.dp).fillMaxHeight(),
                         color = MaterialTheme.colorScheme.outlineVariant,
                     )
+                }
                 }
             }
         }
@@ -1266,42 +1266,56 @@ private fun EditorToolbar(
     canSmooth: Boolean = false,
     onSmoothSelection: () -> Unit = {},
 ) {
-    Surface(tonalElevation = 4.dp) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-            // Primary tool row.
+    // Nebo pattern: a slim always-visible strip; tapping the active
+    // pen/highlighter/eraser/shapes tool toggles its settings panel.
+    var pickerOpen by remember { mutableStateOf(true) }
+    fun stripClick(t: Tool) {
+        if (t == tool && (t == Tool.PEN || t == Tool.HIGHLIGHTER || t == Tool.ERASER || t == Tool.SHAPES)) {
+            pickerOpen = !pickerOpen
+        } else {
+            onTool(t)
+            pickerOpen = true
+        }
+    }
+    val showPicker = pickerOpen && (tool == Tool.PEN || tool == Tool.HIGHLIGHTER || tool == Tool.ERASER || tool == Tool.SHAPES)
+    Surface(tonalElevation = 2.dp) {
+        Column(Modifier.fillMaxWidth()) {
+            // Primary tool strip.
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ToolButton(
                     label = "Pen",
                     selected = tool == Tool.PEN,
-                    onClick = { onTool(Tool.PEN) },
+                    onClick = { stripClick(Tool.PEN) },
                     content = { Icon(Icons.Filled.BorderColor, contentDescription = "Pen") },
                 )
                 ToolButton(
                     label = "Highlighter",
                     selected = tool == Tool.HIGHLIGHTER,
-                    onClick = { onTool(Tool.HIGHLIGHTER) },
+                    onClick = { stripClick(Tool.HIGHLIGHTER) },
                     content = { Icon(Icons.Filled.Highlight, contentDescription = "Highlighter") },
                 )
                 ToolButton(
                     label = "Eraser",
                     selected = tool == Tool.ERASER,
-                    onClick = { onTool(Tool.ERASER) },
+                    onClick = { stripClick(Tool.ERASER) },
                     content = { Icon(Icons.Outlined.Circle, contentDescription = "Eraser") },
                 )
                 ToolButton(
                     label = "Select",
                     selected = tool == Tool.SELECT,
-                    onClick = { onTool(Tool.SELECT) },
+                    onClick = { stripClick(Tool.SELECT) },
                     content = { Icon(Icons.Filled.SelectAll, contentDescription = "Select") },
                 )
                 ToolButton(
                     label = "Shapes",
                     selected = tool == Tool.SHAPES,
-                    onClick = { onTool(Tool.SHAPES) },
+                    onClick = { stripClick(Tool.SHAPES) },
                     content = { Icon(Icons.Filled.Category, contentDescription = "Shapes") },
                 )
                 ToolButton(
@@ -1323,8 +1337,6 @@ private fun EditorToolbar(
                     content = { Icon(Icons.Filled.GridOn, contentDescription = "Page template") },
                 )
 
-                Spacer(Modifier.width(8.dp))
-
                 // Feature 1: automatic write/erase detection. Off by default; when off the
                 // pen/eraser behave exactly as before. Manual tool selection always wins.
                 ToolButton(
@@ -1333,16 +1345,13 @@ private fun EditorToolbar(
                     onClick = onAutoEraseToggle,
                     content = { Icon(Icons.Filled.AutoFixHigh, contentDescription = "Auto-erase") },
                 )
-
-                Spacer(Modifier.width(8.dp))
             }
 
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(8.dp))
-
-            // Context row: colors + thickness (or eraser size).
-            when (tool) {
+            // Context panel: settings for the active tool, or selection actions.
+            if (showPicker || tool == Tool.SELECT) {
+                HorizontalDivider()
+                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    when (tool) {
                 Tool.PEN, Tool.HIGHLIGHTER -> {
                     if (tool == Tool.PEN) {
                         Row(
@@ -1518,6 +1527,8 @@ private fun EditorToolbar(
                     }
                 }
                 else -> Unit
+                    }
+                }
             }
         }
     }
@@ -1591,22 +1602,22 @@ private fun ToolButton(
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
+    // Nebo-style compact strip button: icon-only 48dp target, pill highlight +
+    // accent underline for the active tool. Label stays as content description.
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .defaultMinSize(minWidth = 48.dp, minHeight = if (selected) 56.dp else 48.dp)
+            .size(48.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(if (selected) MaterialTheme.colorScheme.primaryContainer
                 else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(4.dp),
     ) {
-        content()
-        Text(label, style = MaterialTheme.typography.labelSmall)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { content() }
         // Active tool indicator: 2dp accent underline (4dp spacing grid).
         Box(
             modifier = Modifier
-                .padding(top = 4.dp)
                 .size(width = 24.dp, height = 2.dp)
                 .clip(RoundedCornerShape(2.dp))
                 .background(if (selected) VellumAccent else Color.Transparent)

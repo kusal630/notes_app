@@ -346,11 +346,14 @@ class InkCanvasView @JvmOverloads constructor(
         lastClassified = classified
 
         // A new gesture always starts clean: clear any erase-override from a previous
-        // gesture and reset the write/erase detector.
+        // gesture and reset the write/erase detector. Also claim the touch stream so
+        // no ancestor (edge-to-edge insets, dialogs) can steal it mid-stroke — a
+        // stolen stream arrives here as CANCEL and kills the live stroke.
         if (input.action == com.vellum.notes.input.InputAction.DOWN ||
             input.action == com.vellum.notes.input.InputAction.POINTER_DOWN
         ) {
             gestureEraseOverride = false
+            parent?.requestDisallowInterceptTouchEvent(true)
         }
 
         // Two-finger gestures take priority over the active tool so the page can be
@@ -379,6 +382,7 @@ class InkCanvasView @JvmOverloads constructor(
             input.action == com.vellum.notes.input.InputAction.CANCEL
         ) {
             gestureEraseOverride = false
+            parent?.requestDisallowInterceptTouchEvent(false)
         }
         return true
     }
@@ -619,6 +623,12 @@ class InkCanvasView @JvmOverloads constructor(
                         }
                         invalidate()
                     }
+                } else if (strokeBuilder != null && classified.contactFor(writingPointerId) == null) {
+                    // The UP belonged to a different pointer and the engine no longer
+                    // holds this view's writer (lock dropped mid-gesture): finalize the
+                    // stranded stroke now instead of leaving a phantom builder that
+                    // swallows the next strokes.
+                    finalizeActiveStroke()
                 }
             }
 

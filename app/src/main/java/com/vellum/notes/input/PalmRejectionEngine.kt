@@ -303,7 +303,22 @@ class PalmRejectionEngine(
                             // A palm is already resting but holds no lock: the newly added
                             // WRITING-classified contact (a pen, or a finger with finger
                             // writing enabled) is the intended writer and claims the lock.
-                            if (added.classification == ContactClassification.WRITING) {
+                            // A FINGER contact with finger writing on also claims it —
+                            // but ONLY when a resting palm is already down (PALM/RESTING
+                            // or palm-sized). Without that guard, the second finger of a
+                            // two-finger pan/zoom would steal the lock and kill gestures.
+                            // Waiting for the tracker to promote leaves a dead window
+                            // where the user writes and nothing appears.
+                            val restingPalmPresent = classified.any {
+                                it.contact.pointerId != addedId &&
+                                    (it.classification == ContactClassification.PALM ||
+                                        it.classification == ContactClassification.RESTING ||
+                                        it.contact.maxDimMm >= currentSettings.palmSizeThresholdMm)
+                            }
+                            val claimable = added.classification == ContactClassification.WRITING ||
+                                (added.classification == ContactClassification.FINGER &&
+                                    currentSettings.enableFingerWriting && restingPalmPresent)
+                            if (claimable) {
                                 lock.tryClaim(
                                     addedId,
                                     nowNanos,
@@ -335,7 +350,17 @@ class PalmRejectionEngine(
                                     lockedDim / addedDim >= PalmClassifier.PALM_HANDOFF_RATIO
                                 val handOff = addedIsConfirmedWriter ||
                                     (addedClearlySmaller && currentSettings.enableFingerWriting)
-                                if (handOff) {
+                                // The evicted holder was palm-sized but the size ratio was
+                                // not enough for a handoff, yet the newcomer is a small
+                                // finger and finger writing is on: the holder was a false
+                                // palm lock, so hand the lock over instead of leaving it
+                                // dead (otherwise the user writes and nothing appears).
+                                val palmHolderHandoff = !handOff &&
+                                    added.classification == ContactClassification.FINGER &&
+                                    currentSettings.enableFingerWriting &&
+                                    lockedDim >= currentSettings.palmSizeThresholdMm &&
+                                    addedDim <= currentSettings.effectiveFingerMaxMm()
+                                if (handOff || palmHolderHandoff) {
                                     lock.reset(nowNanos)
                                     lock.tryClaim(addedId, nowNanos, respectHoldoff = false)
                                 } else {
