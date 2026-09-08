@@ -154,6 +154,8 @@ enum class ClassificationReason {
     VELOCITY_GATE,
     /** Contact moved slowly in a coherent cluster (hand-shift drift). */
     HAND_SHIFT_DRIFT,
+    /** Size-ambiguous contact confirmed as a palm by saturated pressure. */
+    PRESSURE_SATURATED,
 }
 
 data class ClassificationResult(

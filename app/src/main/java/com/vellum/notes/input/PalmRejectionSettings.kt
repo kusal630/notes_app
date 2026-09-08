@@ -150,6 +150,15 @@ data class PalmRejectionSettings(
      */
     var allowImmediateDrawWhenIsolated: Boolean = true,
     /**
+     * When on, the size classifier may confirm a palm via saturated pressure: a
+     * contact in the ambiguous finger band (too big to write, small enough to
+     * look like a gesture finger) whose reported pressure is maxed out is the
+     * pressing heel of the palm, not a light gesture finger. Never fires without
+     * reported pressure, on hardware tools, or in multi-pointer relative
+     * classification (a saturated second finger must still start gestures).
+     */
+    var pressureAssistEnabled: Boolean = true,
+    /**
      * When on, the canvas draws a live overlay of every contact with its classification
      * color, size circle and pointer id so resting-hand behavior can be verified on-device.
      */

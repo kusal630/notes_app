@@ -53,6 +53,7 @@ import com.vellum.notes.input.PalmRejectionMode
 import com.vellum.notes.input.PalmRejectionSettings
 import com.vellum.notes.input.PalmZoneMode
 import com.vellum.notes.input.PalmZoneSide
+import com.vellum.notes.input.SensitivityLevel
 import com.vellum.notes.input.SmoothingMode
 import com.vellum.notes.input.WritingPosture
 import com.vellum.notes.input.withWritingPosture
@@ -292,6 +293,37 @@ fun SettingsContent(
             steps = 10,
             modifier = Modifier.fillMaxWidth()
         )
+        Spacer(Modifier.height(8.dp))
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SensitivityLevel.entries.forEachIndexed { index, level ->
+                SegmentedButton(
+                    selected = SensitivityLevel.fromValue(settings.sensitivity) == level,
+                    onClick = { onSettingChange(settings.copy(sensitivity = level.value)) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = SensitivityLevel.entries.size)
+                ) { Text(level.label) }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Pressure assist", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "A large contact pressing at saturated pressure is the palm heel, " +
+                        "not a gesture finger. Ignored on devices without pressure.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = settings.pressureAssistEnabled,
+                onCheckedChange = { onSettingChange(settings.copy(pressureAssistEnabled = it)) },
+            )
+        }
 
         Spacer(Modifier.height(16.dp))
 
@@ -582,6 +614,13 @@ private val PalmZoneSide.label: String
     get() = when (this) {
         PalmZoneSide.LEFT -> "Left"
         PalmZoneSide.RIGHT -> "Right"
+    }
+
+private val SensitivityLevel.label: String
+    get() = when (this) {
+        SensitivityLevel.LOW -> "Low"
+        SensitivityLevel.MEDIUM -> "Medium"
+        SensitivityLevel.HIGH -> "High"
     }
 
 private val WritingPosture.label: String

@@ -120,6 +120,7 @@ class PalmRejectionEngine(
                     contactSpeedMmPerSec = state?.speedMmPerSec ?: 0f,
                     contactDurationMs = state?.let { (nowNanos - it.downTimeNanos) / 1_000_000L } ?: 0L,
                     fingerWritingEnabled = currentSettings.enableFingerWriting,
+                    honorPressure = capabilities.supportsPressure,
                 )
             )
             val classifiedContact = ClassifiedContact(

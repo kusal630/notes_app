@@ -78,6 +78,14 @@ class PalmClassifier(
          * session as the hand warms up / applies different pressure).
          */
         const val HISTORY_WINDOW = 20
+
+        /**
+         * Normalized pressure at or above this means the digitizer is maxed out: a
+         * light gesture finger never saturates the pressure range, while the
+         * pressing heel of a palm does. Only ever used to confirm (never to
+         * acquit) in the size-ambiguous band — see [PalmRejectionSettings.pressureAssistEnabled].
+         */
+        const val SATURATED_PRESSURE = 0.95f
     }
 
     /**
@@ -103,6 +111,11 @@ class PalmClassifier(
         val contactDurationMs: Long = 0L,
         /** When true, a bare finger may act as the writing pointer (palm rejection still on). */
         val fingerWritingEnabled: Boolean = false,
+        /**
+         * When false, pressure is ignored entirely (device reports no usable
+         * pressure). The engine sets this from [InputCapabilities.supportsPressure].
+         */
+        val honorPressure: Boolean = true,
     )
 
     fun classify(contact: NormalizedContact, ctx: ClassifyContext): ClassificationResult {
@@ -311,6 +324,20 @@ class PalmClassifier(
         // a bare fingertip is accepted, while a resting palm stays above it and is rejected.
         val writingDim = if (ctx.fingerWritingEnabled) maxOf(writingMax, fingerMax) else writingMax
 
+        // A size-ambiguous contact pressing at saturated pressure is the palm heel,
+        // not a gesture finger. Only inside the finger band (above the possibly
+        // calibrated writing band, at or below the finger cutoff), so clear size
+        // decisions — small writers and large palms — keep their existing reasons.
+        // Never in relative multi-pointer classification, where a saturated second
+        // finger must still start a two-finger gesture.
+        val inFingerBand = dim > writingMax &&
+            (ctx.mode == PalmRejectionMode.BALANCED && dim <= fingerMax ||
+                ctx.mode == PalmRejectionMode.RELAXED && dim <= relaxedPalm)
+        if (inFingerBand && pressureConfirmedPalm(contact, dim, ctx)) {
+            val threshold = if (ctx.mode == PalmRejectionMode.BALANCED) fingerMax else relaxedPalm
+            return result(ContactClassification.PALM, 0.65f, ClassificationReason.PRESSURE_SATURATED, threshold, ctx)
+        }
+
         return when (ctx.mode) {
             PalmRejectionMode.STRICT -> if (dim <= writingDim) {
                 result(ContactClassification.WRITING, 0.9f, ClassificationReason.SMALL_CONTACT, writingDim, ctx)
@@ -341,6 +368,12 @@ class PalmClassifier(
     private fun classifyValid(contact: NormalizedContact, ctx: ClassifyContext, confidence: Float): ClassificationResult {
         val fingerMax = settings.effectiveFingerMaxMm()
         val writingMax = settings.effectiveWritingMaxMm()
+        if ((ctx.mode == PalmRejectionMode.BALANCED || ctx.mode == PalmRejectionMode.RELAXED) &&
+            contact.maxDimMm > writingMax && contact.maxDimMm <= fingerMax &&
+            pressureConfirmedPalm(contact, contact.maxDimMm, ctx)
+        ) {
+            return result(ContactClassification.PALM, 0.65f, ClassificationReason.PRESSURE_SATURATED, fingerMax, ctx)
+        }
         return if (ctx.mode == PalmRejectionMode.BALANCED || ctx.mode == PalmRejectionMode.RELAXED) {
             if (contact.maxDimMm <= writingMax) {
                 result(ContactClassification.WRITING, confidence, ClassificationReason.SMALL_CONTACT, writingMax, ctx)
@@ -364,6 +397,22 @@ class PalmClassifier(
             }
         }
     }
+
+    /**
+     * Saturated-pressure palm confirmation for the size-ambiguous band: the digitizer
+     * is maxed out AND the contact is suspiciously large. Hardware tools never reach
+     * here (returned earlier), and callers restrict this to the fallback paths where
+     * size alone was indecisive.
+     */
+    private fun pressureConfirmedPalm(
+        contact: NormalizedContact,
+        dim: Float,
+        ctx: ClassifyContext,
+    ): Boolean = settings.pressureAssistEnabled &&
+        ctx.honorPressure &&
+        contact.hasPressure &&
+        contact.pressure >= SATURATED_PRESSURE &&
+        dim >= settings.suspiciousSizeThresholdMm
 
     /**
      * Feeds one classification back into the rolling history. This is what lets the
