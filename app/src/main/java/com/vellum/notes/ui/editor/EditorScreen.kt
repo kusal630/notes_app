@@ -3,6 +3,7 @@ package com.vellum.notes.ui.editor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -736,6 +739,18 @@ fun EditorScreen(
                             .fillMaxHeight(),
                         onSelectPage = { id -> selectedPageId = id },
                         onNewPage = { scope.launch { repository.createPage(notebookId) } },
+                        onDuplicatePage = { id ->
+                            scope.launch {
+                                val newId = repository.duplicatePage(id)
+                                selectedPageId = newId
+                            }
+                        },
+                        onDeletePage = { id ->
+                            scope.launch {
+                                repository.deletePage(id)
+                                if (id == selectedPageId) selectedPageId = null
+                            }
+                        },
                     )
                     HorizontalDivider(
                         modifier = Modifier.width(1.dp).fillMaxHeight(),
@@ -1009,6 +1024,7 @@ private fun SidebarTab(label: String, selected: Boolean, onClick: () -> Unit, mo
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PageRail(
     pages: List<PageSummary>,
@@ -1016,6 +1032,8 @@ private fun PageRail(
     compact: Boolean,
     onSelectPage: (Long) -> Unit,
     onNewPage: () -> Unit,
+    onDuplicatePage: (Long) -> Unit = {},
+    onDeletePage: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -1031,26 +1049,50 @@ private fun PageRail(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(pages, key = { it.id }) { page ->
-                        if (compact) {
-                            val isCurrent = page.id == currentPageId
-                            Box(
-                                modifier = Modifier
-                                    .defaultMinSize(minHeight = 48.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(
-                                        if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                        else MaterialTheme.colorScheme.surface
-                                    )
-                                    .border(
-                                        width = if (isCurrent) 2.dp else 1.dp,
-                                        color = if (isCurrent) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.outlineVariant,
-                                        shape = RoundedCornerShape(6.dp),
-                                    )
-                                    .clickable { onSelectPage(page.id) },
-                            )
-                        } else {
-                            PageThumbnail(page, selected = page.id == currentPageId, onClick = { onSelectPage(page.id) })
+                        var menuOpen by remember(page.id) { mutableStateOf(false) }
+                        Box {
+                            if (compact) {
+                                val isCurrent = page.id == currentPageId
+                                Box(
+                                    modifier = Modifier
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                            else MaterialTheme.colorScheme.surface
+                                        )
+                                        .border(
+                                            width = if (isCurrent) 2.dp else 1.dp,
+                                            color = if (isCurrent) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.outlineVariant,
+                                            shape = RoundedCornerShape(6.dp),
+                                        )
+                                        .combinedClickable(
+                                            onClick = { onSelectPage(page.id) },
+                                            onLongClick = { menuOpen = true },
+                                        ),
+                                )
+                            } else {
+                                PageThumbnail(
+                                    page,
+                                    selected = page.id == currentPageId,
+                                    onClick = { onSelectPage(page.id) },
+                                    onLongClick = { menuOpen = true },
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Duplicate") },
+                                    onClick = { menuOpen = false; onDuplicatePage(page.id) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Delete") },
+                                    onClick = { menuOpen = false; onDeletePage(page.id) },
+                                )
+                            }
                         }
                     }
                 }
@@ -1080,8 +1122,9 @@ private fun PageRail(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun PageThumbnail(page: PageSummary, selected: Boolean, onClick: () -> Unit) {
+private fun PageThumbnail(page: PageSummary, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1095,7 +1138,7 @@ private fun PageThumbnail(page: PageSummary, selected: Boolean, onClick: () -> U
                 else MaterialTheme.colorScheme.outlineVariant,
                 shape = RoundedCornerShape(6.dp),
             )
-            .clickable(onClick = onClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.BottomStart,
     ) {
         Text(

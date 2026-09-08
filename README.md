@@ -21,7 +21,7 @@ leaves ink — no proprietary or cloud palm-rejection service required.
 - Text boxes: typed text blocks layered between images and ink
 - Classroom Notes: optional on-device recording that transcribes your lecture in
   real time (offline Vosk speech model, transcript saved with the note)
-- Multi-page notebooks with a page navigator
+- Multi-page notebooks with a page navigator (long-press: duplicate/delete)
 - Infinite canvas with pinch-to-zoom and pan
 - Export notes to PDF and share them with other apps
 - Light and dark themes
