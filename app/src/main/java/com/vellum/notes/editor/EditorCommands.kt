@@ -176,6 +176,43 @@ class UpdateTextCommand(val previous: TextObject, val updated: TextObject) : Edi
 }
 
 /**
+ * Nebo-style handwriting conversion: replaces the selected ink strokes + shapes
+ * with one editable [TextObject] in a single undo step. Undo restores the
+ * original ink and removes the text box; redo converts again.
+ */
+class ConvertToTextCommand(
+    val strokes: List<Stroke> = emptyList(),
+    val shapes: List<ShapeObject> = emptyList(),
+    val text: TextObject,
+) : EditorCommand {
+    private val strokeIds = strokes.mapTo(HashSet()) { it.id }
+    private val shapeIds = shapes.mapTo(HashSet()) { it.id }
+
+    override fun apply(content: PageContent): PageContent = content.copy(
+        strokes = content.strokes.filterNot { it.id in strokeIds },
+        shapeObjects = content.shapeObjects.filterNot { it.id in shapeIds },
+        textObjects = content.textObjects + text,
+    )
+
+    override fun invert() = RestoreConvertedInkCommand(strokes, shapes, text)
+}
+
+/** Inverse of [ConvertToTextCommand]: removes the text box, restores the ink. */
+class RestoreConvertedInkCommand(
+    val strokes: List<Stroke> = emptyList(),
+    val shapes: List<ShapeObject> = emptyList(),
+    val text: TextObject,
+) : EditorCommand {
+    override fun apply(content: PageContent): PageContent = content.copy(
+        strokes = content.strokes + strokes,
+        shapeObjects = content.shapeObjects + shapes,
+        textObjects = content.textObjects.filterNot { it.id == text.id },
+    )
+
+    override fun invert() = ConvertToTextCommand(strokes, shapes, text)
+}
+
+/**
  * Bounded undo/redo stacks. Keeps memory small for large notebooks (default 200
  * commands) and drops the redo stack on new edits, matching standard editor behavior.
  */

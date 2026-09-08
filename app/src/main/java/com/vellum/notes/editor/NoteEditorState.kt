@@ -134,6 +134,32 @@ class NoteEditorState(
         apply(UpdateTextCommand(previous = current, updated = updated))
     }
 
+    /**
+     * Nebo-style convert: replaces the selected ink strokes + shapes with one
+     * editable text box (recognition engine is stubbed, so the box starts with
+     * [recognizedText] — usually empty — and the UI opens it for editing).
+     * Single undo step. Returns the new text id, or 0 when nothing convertible
+     * is selected.
+     */
+    fun convertSelectionToText(
+        recognizedText: String = "",
+        recognizer: HandwritingConvert.Recognizer = HandwritingConvert.StubRecognizer,
+    ): Long {
+        val ids = _selectedIds.value
+        if (ids.isEmpty()) return 0L
+        val strokes = _content.value.strokes.filter { it.id in ids }
+        val shapes = _content.value.shapeObjects.filter { it.id in ids }
+        if (strokes.isEmpty() && shapes.isEmpty()) return 0L
+        val bounds = HandwritingConvert.selectionBoundsMm(strokes, shapes) ?: return 0L
+        val text = if (recognizedText.isNotEmpty()) recognizedText
+        else recognizer.recognize(strokes)
+        val box = HandwritingConvert.buildTextObject(bounds, nextId(), text)
+        apply(ConvertToTextCommand(strokes = strokes, shapes = shapes, text = box))
+        clearSelection()
+        _selectedIds.value = setOf(box.id)
+        return box.id
+    }
+
     /** Moves an image by delta (undoable, coalesced during drags). */
     fun moveImageBy(id: Long, dx: Float, dy: Float) {
         val current = _content.value.imageObjects.firstOrNull { it.id == id } ?: return

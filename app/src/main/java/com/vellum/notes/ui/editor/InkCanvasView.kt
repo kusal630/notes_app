@@ -72,6 +72,11 @@ class InkCanvasView @JvmOverloads constructor(
         fun onSelectionResizeStart(handleIndex: Int)
         fun onSelectionResizeTo(worldX: Float, worldY: Float)
         fun onSelectionResizeEnd()
+        /**
+         * Nebo-style gesture: double-tap with two fingers = undo.
+         * Default no-op so existing listeners keep compiling.
+         */
+        fun onTwoFingerDoubleTap() {}
     }
 
     lateinit var capabilities: InputCapabilities
@@ -308,6 +313,9 @@ class InkCanvasView @JvmOverloads constructor(
 
     private var gesture: GestureStart? = null
 
+    /** Nebo-style double-tap-with-two-fingers = undo detector (raw touch path). */
+    private val twoFingerTapDetector = com.vellum.notes.editor.TwoFingerDoubleTapDetector()
+
     /** Most recent classified frame, kept for the debug overlay (drawn only when enabled). */
     private var lastClassified: ClassifiedFrame? = null
 
@@ -322,6 +330,37 @@ class InkCanvasView @JvmOverloads constructor(
     fun screenToWorldY(sy: Float) = (sy - offsetY) / scale
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Nebo-style double-tap with two fingers = undo. Detected on the raw
+        // touch path (before palm rejection) so it works regardless of how the
+        // engine classifies the two contacts. Quick taps never move enough to
+        // disturb the pan/zoom state; a real pan breaks the pending tap instead.
+        when (event.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount == 2) {
+                    val cx = (event.getX(0) + event.getX(1)) / 2f
+                    val cy = (event.getY(0) + event.getY(1)) / 2f
+                    if (twoFingerTapDetector.onTwoFingerDown(event.eventTime, cx, cy)) {
+                        finalizeActiveStroke()
+                        gesture = null
+                        twoFingerTapDetector.reset()
+                        listener?.onTwoFingerDoubleTap()
+                        return true
+                    }
+                } else if (event.pointerCount > 2) {
+                    twoFingerTapDetector.reset()
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (event.pointerCount == 2) {
+                    // pointerCount still includes the lifted pointer here.
+                    val cx = (event.getX(0) + event.getX(1)) / 2f
+                    val cy = (event.getY(0) + event.getY(1)) / 2f
+                    twoFingerTapDetector.onTwoFingerUp(event.eventTime, cx, cy)
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> twoFingerTapDetector.reset()
+            else -> Unit
+        }
         if (detectorSensitivity != scribbleSensitivity) {
             detectorSensitivity = scribbleSensitivity
             val s = scribbleSensitivity

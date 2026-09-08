@@ -131,6 +131,10 @@ class EditorViewModel(
         override fun onSelectionResizeEnd() {
             _editor.value?.endResizeSelection()
         }
+
+        override fun onTwoFingerDoubleTap() {
+            _editor.value?.undo()
+        }
     }
 
     fun setTool(tool: Tool) = _editor.value?.setTool(tool)
@@ -172,6 +176,9 @@ class EditorViewModel(
     fun duplicateSelection() = _editor.value?.duplicateSelection()
     fun smoothSelection() = _editor.value?.smoothSelection()
     fun clearSelection() = _editor.value?.clearSelection()
+
+    /** Nebo-style convert; returns the new text id (0 when nothing convertible). */
+    fun convertSelectionToText(): Long = _editor.value?.convertSelectionToText() ?: 0L
 
     override fun onCleared() {
         saveJob?.cancel()

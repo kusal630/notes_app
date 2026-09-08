@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Title
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -147,9 +148,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 
-private val PALETTE = listOf(
-    0xFF000000, 0xFF424242, 0xFFFFFFFF, 0xFFE53935, 0xFFFB8C00, 0xFFFDD835,
-    0xFF43A047, 0xFF00ACC1, 0xFF1E88E5, 0xFF8E24AA, 0xFFEC407A,
+private val PALETTE = com.vellum.notes.editor.PaperAesthetics.PAPER_INKS + listOf(
+    0xFF000000, 0xFF424242, 0xFFFFFFFF, 0xFFFB8C00, 0xFFFDD835,
+    0xFF43A047, 0xFF00ACC1, 0xFF8E24AA, 0xFFEC407A,
 )
 
 private val PEN_WIDTHS_MM = listOf(0.3f, 0.5f, 0.7f, 1f, 1.5f, 2f, 3f, 5f)
@@ -619,6 +620,12 @@ fun EditorScreen(
                     },
                     canSmooth = content.strokes.any { it.id in selectedIds },
                     onSmoothSelection = { vm.smoothSelection() },
+                    canConvert = content.strokes.any { it.id in selectedIds } ||
+                        content.shapeObjects.any { it.id in selectedIds },
+                    onConvertSelection = {
+                        val newId = vm.convertSelectionToText()
+                        if (newId != 0L) editingTextId = newId
+                    },
                 )
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                 // Canvas fills the whole screen so you can write edge to edge; the page
@@ -1265,6 +1272,8 @@ private fun EditorToolbar(
     onEditText: () -> Unit = {},
     canSmooth: Boolean = false,
     onSmoothSelection: () -> Unit = {},
+    canConvert: Boolean = false,
+    onConvertSelection: () -> Unit = {},
 ) {
     // Nebo pattern: a slim always-visible strip; tapping the active
     // pen/highlighter/eraser/shapes tool toggles its settings panel.
@@ -1509,6 +1518,13 @@ private fun EditorToolbar(
                                     Icon(Icons.Filled.AutoFixHigh, contentDescription = null)
                                     Spacer(Modifier.width(4.dp))
                                     Text("Smooth")
+                                }
+                            }
+                            if (canConvert) {
+                                TextButton(onClick = onConvertSelection) {
+                                    Icon(Icons.Filled.Title, contentDescription = null)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Convert")
                                 }
                             }
                             TextButton(onClick = onDuplicateSelection) {
