@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -109,8 +110,6 @@ import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.core.content.FileProvider
 import com.vellum.notes.VellumApp
@@ -260,8 +259,11 @@ fun EditorScreen(
     // Opening one shows the sidebar from the start (with a "record" hint) so the feature
     // is discoverable; a normal note only shows it once a recording is started.
     var isClassroom by remember { mutableStateOf(false) }
+    var notebookName by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(notebookId) {
-        isClassroom = repository.getNotebook(notebookId)?.type == NoteType.CLASSROOM
+        val notebook = repository.getNotebook(notebookId)
+        isClassroom = notebook?.type == NoteType.CLASSROOM
+        notebookName = notebook?.title
     }
 
     // --- Classroom Notes (Feature 2): on-device recording + transcript sidebar. ---
@@ -383,7 +385,7 @@ fun EditorScreen(
             onDismissRequest = { showTemplateDialog = false },
             title = { Text("Page template") },
             text = {
-                Column {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     PaperTemplates.ALL.forEach { t ->
                         Row(
                             modifier = Modifier
@@ -487,6 +489,7 @@ fun EditorScreen(
         topBar = {
             EditorTopBar(
                 notebookId = notebookId,
+                notebookName = notebookName,
                 canUndo = editorState!!.canUndo,
                 canRedo = editorState!!.canRedo,
                 onUndo = { vm.undo() },
@@ -775,6 +778,7 @@ fun EditorScreen(
 @Composable
 private fun EditorTopBar(
     notebookId: Long,
+    notebookName: String?,
     canUndo: Boolean,
     canRedo: Boolean,
     onUndo: () -> Unit,
@@ -790,7 +794,7 @@ private fun EditorTopBar(
 ) {
     TopAppBar(
         title = {
-            Text("Notebook · ${notebookId}", fontWeight = FontWeight.SemiBold)
+            Text(notebookName ?: "Notebook · ${notebookId}", fontWeight = FontWeight.SemiBold)
         },
         navigationIcon = {
             IconButton(onClick = onBack) {

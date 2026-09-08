@@ -441,7 +441,7 @@ private fun CoverPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text("Cover") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 NotebookCovers.ALL.chunked(4).forEach { rowCovers ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         rowCovers.forEach { cover ->
