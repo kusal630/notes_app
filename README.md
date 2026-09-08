@@ -18,6 +18,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | 📄 Pages | Multi-page notebooks, page rail, long-press **duplicate / delete**, templates per notebook + per page |
 | 📚 Paper | 11 templates (ruled, grid, dotted, graph, Cornell, music, math…), 10 premium covers incl. Aurum Gold |
 | 🔍 Organize | Home **search**, Recent / A–Z sort, favorites-first + favorites filter |
+| 💾 Backup | One-tap local ZIP export (database + images + PDF pages) to your own folder — no cloud |
 | 📥 PDF | Import & annotate any PDF offline; export notes to PDF and share |
 | 🎙️ Classroom | Optional on-device recording with live Vosk transcription + summary, saved with the note |
 | 🎨 Canvas | Infinite canvas, pinch-to-zoom + pan, undo/redo, light & dark themes |

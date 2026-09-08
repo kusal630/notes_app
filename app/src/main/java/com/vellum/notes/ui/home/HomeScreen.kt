@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -78,6 +79,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.vellum.notes.data.NotesRepository
+import com.vellum.notes.data.BackupManager
+import com.vellum.notes.data.RoomNotesRepository
 import com.vellum.notes.model.Notebook
 import com.vellum.notes.model.NoteType
 import kotlinx.coroutines.launch
@@ -130,6 +133,32 @@ fun HomeScreen(
 
     var showNewDialog by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Notebook?>(null) }
+    var backingUp by remember { mutableStateOf(false) }
+
+    // Local backup export (S8): versioned ZIP of db + assets via SAF. Offline.
+    val backupPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        backingUp = true
+        scope.launch {
+            try {
+                (repository as? RoomNotesRepository)?.checkpoint()
+                val count = withContext(Dispatchers.IO) {
+                    BackupManager.exportZip(context, uri)
+                }
+                Toast.makeText(
+                    context,
+                    if (count != null) "Backup saved ($count files)" else "Backup failed",
+                    Toast.LENGTH_LONG,
+                ).show()
+            } catch (t: Throwable) {
+                Toast.makeText(context, "Backup failed: ${t.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                backingUp = false
+            }
+        }
+    }
 
     // Which note type to show: null = all, otherwise only that type.
     var filter by remember { mutableStateOf<NoteType?>(null) }
@@ -143,6 +172,16 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("Vellum") },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            val stamp = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                                .format(java.util.Date())
+                            backupPicker.launch("vellum-backup-$stamp.zip")
+                        },
+                        enabled = !backingUp,
+                    ) {
+                        Icon(Icons.Filled.Save, contentDescription = "Back up notes")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }

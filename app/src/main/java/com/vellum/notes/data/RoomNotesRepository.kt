@@ -21,10 +21,17 @@ import kotlinx.serialization.json.Json
  * so the document model can evolve without schema migrations; catalog fields stay
  * queryable columns. Serialization uses the same [Json] instance as the editor.
  */
-class RoomNotesRepository(db: AppDatabase) : NotesRepository {
+class RoomNotesRepository(private val db: AppDatabase) : NotesRepository {
 
     private val notebookDao = db.notebookDao()
     private val pageDao: PageDao = db.pageDao()
+
+    /** Flushes the WAL into the db file so a file-level backup is consistent. */
+    suspend fun checkpoint() {
+        runCatching {
+            db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").close()
+        }
+    }
 
     override val notebooks: Flow<List<Notebook>> =
         notebookDao.observeNotebooks().map { rows ->
