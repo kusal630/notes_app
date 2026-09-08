@@ -19,7 +19,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | 📚 Paper | 11 templates (ruled, grid, dotted, graph, Cornell, music, math…), 10 premium covers incl. Aurum Gold |
 | 🕘 History | Page snapshots on close + on demand (deduped, newest 20 kept), restore with pre-restore safety snapshot, per-page history from the page rail |
 | 🔍 Organize | Noteshelf home (sidebar + categories, Starred/Unfiled/Trash/Archived), tags with filter chips, full-text search over titles/typed text/transcripts/summaries, Quick Note, Recent / A–Z sort |
-| 💾 Backup | One-tap local ZIP export (database + images + PDF pages) to your own folder — no cloud |
+| 💾 Backup | One-tap local ZIP export (database + images + PDF pages) to your own folder — no cloud. Passphrase-encrypted backups (AES-256-GCM) + in-app restore with safety copy; the passphrase is never stored |
 | 📥 PDF | Import & annotate any PDF offline; export preserves italic/underline/alignment; reader themes + auto-trim coming |
 | 📖 Read mode | Read imported books full-screen (Original/Sepia/Night), freehand highlighter in 4 colors, tap-erase, every highlight saved per page + searchable review list that jumps back to the exact page |
 | 🎙️ Classroom | Optional on-device recording with live Vosk transcription + summary, saved with the note |

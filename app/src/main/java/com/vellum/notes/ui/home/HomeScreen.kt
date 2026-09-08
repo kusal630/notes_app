@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -70,6 +71,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -95,6 +97,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -203,24 +206,49 @@ fun HomeScreen(
     var tagChecked by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var categoryDialog by remember { mutableStateOf<CategoryDialog?>(null) }
     var backingUp by remember { mutableStateOf(false) }
+    var backupDialogOpen by remember { mutableStateOf(false) }
+    var pendingEncryptedPass by remember { mutableStateOf<CharArray?>(null) }
+    var restoreBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var restoreConfirmOpen by remember { mutableStateOf(false) }
+    var restorePassOpen by remember { mutableStateOf(false) }
+    var restoreDone by remember { mutableStateOf(false) }
+    var restoreError by remember { mutableStateOf<String?>(null) }
 
     // Local backup export: versioned ZIP of db + assets via SAF. Offline.
+    // The same picker serves plain and encrypted exports: when
+    // pendingEncryptedPass is set, the payload is AES-256-GCM sealed.
     val backupPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
+        if (uri == null) {
+            pendingEncryptedPass = null
+            return@rememberLauncherForActivityResult
+        }
         backingUp = true
         scope.launch {
             try {
                 (repository as? RoomNotesRepository)?.checkpoint()
-                val count = withContext(Dispatchers.IO) {
-                    BackupManager.exportZip(context, uri)
+                val pass = pendingEncryptedPass
+                pendingEncryptedPass = null
+                if (pass != null) {
+                    val ok = withContext(Dispatchers.IO) {
+                        BackupManager.exportEncrypted(context, uri, pass)
+                    }
+                    Toast.makeText(
+                        context,
+                        if (ok) "Encrypted backup saved" else "Backup failed",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    val count = withContext(Dispatchers.IO) {
+                        BackupManager.exportZip(context, uri)
+                    }
+                    Toast.makeText(
+                        context,
+                        if (count != null) "Backup saved ($count files)" else "Backup failed",
+                        Toast.LENGTH_LONG,
+                    ).show()
                 }
-                Toast.makeText(
-                    context,
-                    if (count != null) "Backup saved ($count files)" else "Backup failed",
-                    Toast.LENGTH_LONG,
-                ).show()
             } catch (t: Throwable) {
                 Toast.makeText(context, "Backup failed: ${t.message}", Toast.LENGTH_LONG).show()
             } finally {
@@ -228,9 +256,71 @@ fun HomeScreen(
             }
         }
     }
-    val launchBackup = {
+    val launchBackup = { encryptedPass: CharArray? ->
+        pendingEncryptedPass = encryptedPass
         val stamp = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
-        backupPicker.launch("vellum-backup-$stamp.zip")
+        val name = if (encryptedPass != null) "vellum-backup-$stamp.encrypted.zip"
+        else "vellum-backup-$stamp.zip"
+        backupPicker.launch(name)
+    }
+
+    // Restore picker: reads the whole payload so the confirm dialog can tell
+    // encrypted payloads apart before asking for a passphrase.
+    val restorePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            restoreError = null
+            restoreDone = false
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                }.getOrNull()
+            }
+            if (bytes == null) {
+                restoreError = "Could not read that file."
+            } else {
+                restoreBytes = bytes
+                restoreConfirmOpen = true
+            }
+        }
+    }
+    // Runs the validated restore: checkpoint (safety copy keeps the WAL),
+    // close the live DB, replace files. Success always ends in a restart.
+    val runRestore: (CharArray?) -> Unit = { pass ->
+        val bytes = restoreBytes
+        if (bytes != null) {
+            backingUp = true
+            scope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        (repository as? RoomNotesRepository)?.checkpoint()
+                        com.vellum.notes.data.db.AppDatabase.close()
+                        BackupManager.importBackup(context, bytes, pass) {
+                            com.vellum.notes.data.db.AppDatabase.close()
+                        }
+                    }
+                    when (result) {
+                        BackupManager.RestoreResult.Success -> {
+                            restoreDone = true
+                            restoreConfirmOpen = false
+                            restorePassOpen = false
+                        }
+                        BackupManager.RestoreResult.WrongPassphrase -> {
+                            restoreError = "Wrong passphrase."
+                            restorePassOpen = true
+                        }
+                        BackupManager.RestoreResult.InvalidBackup ->
+                            restoreError = "Not a Vellum backup."
+                        is BackupManager.RestoreResult.Error ->
+                            restoreError = "Restore failed: ${result.message ?: "unknown error"}"
+                    }
+                } finally {
+                    backingUp = false
+                }
+            }
+        }
     }
 
     var query by remember { mutableStateOf("") }
@@ -276,7 +366,7 @@ fun HomeScreen(
             onDeleteCategory = { categoryDialog = CategoryDialog.Delete(it) },
             onOpenSettings = { closeDrawer(); onOpenSettings() },
             onOpenDiagnostics = { closeDrawer(); onOpenDiagnostics() },
-            onBackup = { closeDrawer(); launchBackup() },
+            onBackup = { closeDrawer(); backupDialogOpen = true },
             backupEnabled = !backingUp,
         )
     }
@@ -485,6 +575,123 @@ fun HomeScreen(
                     repository.deleteTag(id)
                     tagChecked = tagChecked - id
                 }
+            },
+        )
+    }
+
+    if (backupDialogOpen) {
+        BackupDialog(
+            onDismiss = { backupDialogOpen = false },
+            onPlainBackup = {
+                backupDialogOpen = false
+                launchBackup(null)
+            },
+            onEncryptedBackup = { pass ->
+                backupDialogOpen = false
+                launchBackup(pass)
+            },
+            onRestore = {
+                backupDialogOpen = false
+                restorePicker.launch(arrayOf("*/*"))
+            },
+        )
+    }
+
+    if (restoreConfirmOpen && restoreBytes != null) {
+        val encrypted = com.vellum.notes.data.SyncCrypto.isEncrypted(restoreBytes!!)
+        AlertDialog(
+            onDismissRequest = {
+                restoreConfirmOpen = false
+                restoreBytes = null
+            },
+            title = { Text("Restore backup?") },
+            text = {
+                Text(
+                    "This replaces every note on this device with the backup " +
+                        "(a safety copy is kept first). The app restarts afterwards." +
+                        if (encrypted) " This backup is encrypted — a passphrase is needed next."
+                        else "",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (encrypted) {
+                        restoreConfirmOpen = false
+                        restorePassOpen = true
+                    } else {
+                        runRestore(null)
+                    }
+                }) { Text("Restore") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    restoreConfirmOpen = false
+                    restoreBytes = null
+                }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (restorePassOpen) {
+        var pass by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = {
+                restorePassOpen = false
+                restoreBytes = null
+            },
+            title = { Text("Backup passphrase") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = pass,
+                        onValueChange = { pass = it },
+                        label = { Text("Passphrase") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    if (restoreError != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(restoreError!!, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { runRestore(pass.toCharArray()) },
+                    enabled = pass.length >= com.vellum.notes.data.SyncCrypto.MIN_PASSPHRASE_CHARS,
+                ) { Text("Unlock & restore") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    restorePassOpen = false
+                    restoreBytes = null
+                }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (restoreError != null && !restorePassOpen && !restoreDone) {
+        AlertDialog(
+            onDismissRequest = { restoreError = null },
+            title = { Text("Restore") },
+            text = { Text(restoreError!!) },
+            confirmButton = {
+                TextButton(onClick = { restoreError = null }) { Text("OK") }
+            },
+        )
+    }
+
+    if (restoreDone) {
+        // Blocking: every DAO reference is stale after the file swap — the
+        // only safe next step is a restart.
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Restore complete") },
+            text = { Text("Your notes were replaced. Restart the app to continue.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                }) { Text("Restart now") }
             },
         )
     }
@@ -1408,6 +1615,87 @@ private fun CategoryOption(
         Spacer(Modifier.width(12.dp))
         Text(label)
     }
+}
+
+/** Backup / restore dialog (plain ZIP, passphrase-encrypted ZIP, restore). */
+@Composable
+private fun BackupDialog(
+    onDismiss: () -> Unit,
+    onPlainBackup: () -> Unit,
+    onEncryptedBackup: (CharArray) -> Unit,
+    onRestore: () -> Unit,
+) {
+    var encryptedMode by remember { mutableStateOf(false) }
+    var pass by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    val passOk = pass.length >= com.vellum.notes.data.SyncCrypto.MIN_PASSPHRASE_CHARS
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Back up / Restore") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Backups stay on your device — pick your own folder. Encrypted " +
+                        "backups are AES-256-GCM sealed with your passphrase (never " +
+                        "stored); restoring replaces every note and restarts the app.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                if (!encryptedMode) {
+                    OutlinedButton(onClick = onPlainBackup, modifier = Modifier.fillMaxWidth()) {
+                        Text("Back up (ZIP)")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { encryptedMode = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Encrypted backup…")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = onRestore, modifier = Modifier.fillMaxWidth()) {
+                        Text("Restore from file…")
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = pass,
+                        onValueChange = { pass = it },
+                        label = { Text("Passphrase (min 8 characters)") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = confirm,
+                        onValueChange = { confirm = it },
+                        label = { Text("Confirm passphrase") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        isError = confirm.isNotEmpty() && confirm != pass,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { onEncryptedBackup(pass.toCharArray()) },
+                        enabled = passOk && pass == confirm,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Save encrypted backup")
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    TextButton(
+                        onClick = { encryptedMode = false },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Back") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+    )
 }
 
 /** Tag assignment dialog for one notebook (checkbox list + create + delete). */

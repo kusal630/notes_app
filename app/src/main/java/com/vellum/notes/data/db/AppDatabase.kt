@@ -36,6 +36,18 @@ abstract class AppDatabase : RoomDatabase() {
                     .also { instance = it }
             }
 
+        /**
+         * Closes the singleton (used before a restore replaces the db file).
+         * The next [get] reopens it; every DAO reference obtained before must
+         * be discarded — hence restores always end in an app restart.
+         */
+        fun close() {
+            synchronized(this) {
+                runCatching { instance?.close() }
+                instance = null
+            }
+        }
+
         /** v1 → v2: notebooks gain a note-type column (NORMAL/CLASSROOM). */
         val MIGRATION_1_2 = androidx.room.migration.Migration(1, 2) { db ->
             db.execSQL("ALTER TABLE notebooks ADD COLUMN type TEXT NOT NULL DEFAULT 'NORMAL'")
