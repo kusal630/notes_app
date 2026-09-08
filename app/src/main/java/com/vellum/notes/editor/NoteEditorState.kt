@@ -369,6 +369,25 @@ class NoteEditorState(
         clearSelection()
     }
 
+    /**
+     * One-tap handwriting cleanup: Chaikin-smooths selected ink strokes (single
+     * undo step). Shapes/images/texts are untouched.
+     */
+    fun smoothSelection() {
+        val strokes = _content.value.strokes.filter { it.id in _selectedIds.value }
+        if (strokes.isEmpty()) return
+        val smoothed = com.vellum.notes.render.InkBeautify.smoothStrokes(strokes)
+        if (smoothed.map { it.pointsPacked.toList() } == strokes.map { it.pointsPacked.toList() }) return
+        apply(
+            TransformSelectionCommand(
+                originalStrokes = strokes,
+                transformedStrokes = smoothed,
+                originalShapes = emptyList(),
+                transformedShapes = emptyList(),
+            )
+        )
+    }
+
     fun duplicateSelection() {
         val strokes = _content.value.strokes.filter { it.id in _selectedIds.value }
         val shapes = _content.value.shapeObjects.filter { it.id in _selectedIds.value }

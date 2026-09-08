@@ -584,6 +584,8 @@ fun EditorScreen(
                 onEditText = {
                     selectedIds.firstOrNull()?.let { editingTextId = it }
                 },
+                canSmooth = content.strokes.any { it.id in selectedIds },
+                onSmoothSelection = { vm.smoothSelection() },
             )
         }
     ) { padding ->
@@ -1261,6 +1263,8 @@ private fun EditorToolbar(
     onPickTemplate: () -> Unit = {},
     canEditText: Boolean = false,
     onEditText: () -> Unit = {},
+    canSmooth: Boolean = false,
+    onSmoothSelection: () -> Unit = {},
 ) {
     Surface(tonalElevation = 4.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -1489,6 +1493,13 @@ private fun EditorToolbar(
                                     Icon(Icons.Filled.Edit, contentDescription = null)
                                     Spacer(Modifier.width(4.dp))
                                     Text("Edit text")
+                                }
+                            }
+                            if (canSmooth) {
+                                TextButton(onClick = onSmoothSelection) {
+                                    Icon(Icons.Filled.AutoFixHigh, contentDescription = null)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Smooth")
                                 }
                             }
                             TextButton(onClick = onDuplicateSelection) {

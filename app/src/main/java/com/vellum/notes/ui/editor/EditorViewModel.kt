@@ -170,6 +170,7 @@ class EditorViewModel(
     fun selectAll() = _editor.value?.selectAll()
     fun deleteSelection() = _editor.value?.deleteSelection()
     fun duplicateSelection() = _editor.value?.duplicateSelection()
+    fun smoothSelection() = _editor.value?.smoothSelection()
     fun clearSelection() = _editor.value?.clearSelection()
 
     override fun onCleared() {
