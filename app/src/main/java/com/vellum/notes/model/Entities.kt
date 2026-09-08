@@ -33,6 +33,14 @@ data class Category(
     val notebookCount: Int = 0,
 )
 
+/** A user-defined tag (multi-label organization for notebooks). */
+data class Tag(
+    val id: Long = 0L,
+    val name: String,
+    /** Live count of non-trashed notebooks carrying this tag. */
+    val notebookCount: Int = 0,
+)
+
 /**
  * One freehand highlight stroke in read mode. Points are page-relative (0..1 of
  * the page image) so highlights survive crops and re-rasterization.

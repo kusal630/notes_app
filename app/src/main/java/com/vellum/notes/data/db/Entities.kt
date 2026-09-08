@@ -118,3 +118,62 @@ data class BookHighlightRow(
     val notebookTitle: String = "",
     val pageTitle: String = "",
 )
+
+/**
+ * A user-defined tag. Tags live on notebooks (multi-label organization that
+ * complements the single-category shelf); full-text search covers page text.
+ */
+@Entity(tableName = "tags")
+data class TagEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val name: String,
+)
+
+/** Notebook ↔ tag assignment. Cascades from both sides. */
+@Entity(
+    tableName = "notebook_tags",
+    primaryKeys = ["notebookId", "tagId"],
+    foreignKeys = [
+        ForeignKey(
+            entity = NotebookEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["notebookId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = TagEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["tagId"],
+            onDelete = ForeignKey.CASCADE,
+        )
+    ],
+    indices = [Index("tagId")],
+)
+data class NotebookTagCrossRef(
+    val notebookId: Long,
+    val tagId: Long,
+)
+
+/** Tag + live non-trashed notebook count, produced by the observing query. */
+data class TagRow(
+    @Embedded val tag: TagEntity,
+    val notebookCount: Int = 0,
+)
+
+/**
+ * Full-text index over page text (titles + typed text + transcripts + summaries).
+ * Maintained manually by the repository on every content/title/page change
+ * (see [com.vellum.notes.data.SearchIndex]); FTS tables cannot use foreign
+ * keys, so notebook/page deletions clean it explicitly.
+ */
+@androidx.room.Fts4
+@Entity(tableName = "page_search")
+data class PageSearchEntity(
+    @PrimaryKey
+    @androidx.room.ColumnInfo(name = "rowid")
+    val rowId: Long = 0L,
+    val pageId: Long = 0L,
+    val notebookId: Long = 0L,
+    val title: String = "",
+    val body: String = "",
+)

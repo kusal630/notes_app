@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
@@ -56,11 +57,13 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -101,6 +104,7 @@ import com.vellum.notes.data.RoomNotesRepository
 import com.vellum.notes.model.Category
 import com.vellum.notes.model.NoteType
 import com.vellum.notes.model.Notebook
+import com.vellum.notes.model.Tag
 import com.vellum.notes.model.NotebookCovers
 import com.vellum.notes.model.PaperTemplates
 import com.vellum.notes.pdf.PdfImporter
@@ -143,6 +147,7 @@ fun HomeScreen(
     val notebooks by repository.notebooks.collectAsState(initial = emptyList())
     val trashed by repository.trashedNotebooks.collectAsState(initial = emptyList())
     val categories by repository.categories.collectAsState(initial = emptyList())
+    val tags by repository.allTags.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -194,6 +199,8 @@ fun HomeScreen(
     var showNewDialog by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Notebook?>(null) }
     var moving by remember { mutableStateOf<Notebook?>(null) }
+    var tagging by remember { mutableStateOf<Notebook?>(null) }
+    var tagChecked by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var categoryDialog by remember { mutableStateOf<CategoryDialog?>(null) }
     var backingUp by remember { mutableStateOf(false) }
 
@@ -228,6 +235,25 @@ fun HomeScreen(
 
     var query by remember { mutableStateOf("") }
     var sortByName by remember { mutableStateOf(false) }
+    var activeTagId by remember { mutableStateOf<Long?>(null) }
+    // Full-text page matches for the current query (notebook ids). One-shot per
+    // query change; title/tag matching stays synchronous below.
+    var contentHits by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    LaunchedEffect(query) {
+        contentHits = if (query.isBlank()) emptySet()
+        else runCatching { repository.searchPageTexts(query).toSet() }.getOrDefault(emptySet())
+    }
+    // Tags per notebook for filtering + query matching (local scale: one cheap
+    // query per notebook, refreshed with the notebook list).
+    var notebookTags by remember { mutableStateOf<Map<Long, List<Tag>>>(emptyMap()) }
+    LaunchedEffect(notebooks) {
+        notebookTags = notebooks.associate { nb ->
+            nb.id to runCatching { repository.tagsForNotebook(nb.id) }.getOrDefault(emptyList())
+        }
+    }
+    LaunchedEffect(tags) {
+        if (activeTagId != null && tags.none { it.id == activeTagId }) activeTagId = null
+    }
 
     // Noteshelf counts (non-trashed unless stated).
     val activeHome = notebooks.filterNot { it.isArchived }
@@ -274,6 +300,11 @@ fun HomeScreen(
                     onQuery = { query = it },
                     sortByName = sortByName,
                     onToggleSort = { sortByName = !sortByName },
+                    tags = tags,
+                    activeTagId = activeTagId,
+                    onActiveTag = { activeTagId = it },
+                    contentHits = contentHits,
+                    notebookTags = notebookTags,
                     repository = repository,
                     onOpenNotebook = onOpenNotebook,
                     onQuickNote = {
@@ -292,6 +323,10 @@ fun HomeScreen(
                     onEdit = { editing = it },
                     onMove = { moving = it },
                     onChangeCover = { coverEditing = it },
+                    onTags = {
+                        tagging = it
+                        tagChecked = notebookTags[it.id]?.map { t -> t.id }?.toSet() ?: emptySet()
+                    },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -344,6 +379,11 @@ fun HomeScreen(
                             onQuery = { query = it },
                             sortByName = sortByName,
                             onToggleSort = { sortByName = !sortByName },
+                            tags = tags,
+                            activeTagId = activeTagId,
+                            onActiveTag = { activeTagId = it },
+                            contentHits = contentHits,
+                            notebookTags = notebookTags,
                             repository = repository,
                             onOpenNotebook = onOpenNotebook,
                             onQuickNote = {
@@ -359,6 +399,10 @@ fun HomeScreen(
                             onEdit = { editing = it },
                             onMove = { moving = it },
                             onChangeCover = { coverEditing = it },
+                            onTags = {
+                                tagging = it
+                                tagChecked = notebookTags[it.id]?.map { t -> t.id }?.toSet() ?: emptySet()
+                            },
                             modifier = Modifier.fillMaxSize(),
                             hideTitle = true,
                         )
@@ -415,6 +459,32 @@ fun HomeScreen(
             onPick = { categoryId ->
                 scope.launch { repository.setNotebookCategory(nb.id, categoryId) }
                 moving = null
+            },
+        )
+    }
+
+    tagging?.let { nb ->
+        TagsDialog(
+            notebookTitle = nb.title,
+            allTags = tags,
+            checkedIds = tagChecked,
+            onCheckedChange = { tagChecked = it },
+            onDismiss = { tagging = null },
+            onSave = {
+                scope.launch { repository.setNotebookTags(nb.id, tagChecked) }
+                tagging = null
+            },
+            onCreateTag = { name ->
+                scope.launch {
+                    val id = runCatching { repository.createTag(name) }.getOrNull()
+                    if (id != null) tagChecked = tagChecked + id
+                }
+            },
+            onDeleteTag = { id ->
+                scope.launch {
+                    repository.deleteTag(id)
+                    tagChecked = tagChecked - id
+                }
             },
         )
     }
@@ -684,6 +754,11 @@ private fun HomeContent(
     onQuery: (String) -> Unit,
     sortByName: Boolean,
     onToggleSort: () -> Unit,
+    tags: List<Tag>,
+    activeTagId: Long?,
+    onActiveTag: (Long?) -> Unit,
+    contentHits: Set<Long>,
+    notebookTags: Map<Long, List<Tag>>,
     repository: NotesRepository,
     onOpenNotebook: (Long) -> Unit,
     onQuickNote: () -> Unit,
@@ -694,6 +769,7 @@ private fun HomeContent(
     onEdit: (Notebook) -> Unit,
     onMove: (Notebook) -> Unit,
     onChangeCover: (Notebook) -> Unit,
+    onTags: (Notebook) -> Unit,
     modifier: Modifier = Modifier,
     hideTitle: Boolean = false,
 ) {
@@ -709,7 +785,12 @@ private fun HomeContent(
         is HomeSection.Category -> notebooks.filter { it.categoryId == section.id }
     }
     val visible = base
-        .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }
+        .filter { activeTagId == null || notebookTags[it.id]?.any { t -> t.id == activeTagId } == true }
+        .filter { nb ->
+            query.isBlank() || nb.title.contains(query, ignoreCase = true) ||
+                notebookTags[nb.id]?.any { it.name.contains(query, ignoreCase = true) } == true ||
+                contentHits.contains(nb.id)
+        }
         .sortedWith(
             if (sortByName) compareBy { it.title.lowercase() }
             else compareByDescending { it.updatedAt }
@@ -785,6 +866,31 @@ private fun HomeContent(
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
         )
+        // Tag filter chips (searches titles, tags and page text together).
+        if (tags.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilterChip(
+                    selected = activeTagId == null,
+                    onClick = { onActiveTag(null) },
+                    label = { Text("All") },
+                )
+                tags.forEach { tag ->
+                    FilterChip(
+                        selected = activeTagId == tag.id,
+                        onClick = { onActiveTag(if (activeTagId == tag.id) null else tag.id) },
+                        label = { Text("${tag.name} (${tag.notebookCount})") },
+                        leadingIcon = {
+                            Icon(Icons.Filled.Label, contentDescription = null)
+                        },
+                    )
+                }
+            }
+        }
         TextButton(
             onClick = onToggleSort,
             modifier = Modifier.padding(horizontal = 12.dp),
@@ -851,11 +957,15 @@ private fun HomeContent(
                             onTrash = {
                                 scope.launch { repository.deleteNotebook(nb.id) }
                             },
+                            onTags = { onTags(nb) },
                             onRead = if (pdfBacked) {
                                 { onOpenReader(nb.id) }
                             } else {
                                 null
                             },
+                            showPageMatch = query.isNotBlank() &&
+                                !nb.title.contains(query, ignoreCase = true) &&
+                                contentHits.contains(nb.id),
                         )
                     }
                 }
@@ -900,6 +1010,8 @@ private fun ShelfNotebookCard(
     onChangeCover: () -> Unit,
     onTrash: () -> Unit,
     onRead: (() -> Unit)? = null,
+    onTags: () -> Unit = {},
+    showPageMatch: Boolean = false,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val cover = NotebookCovers.byId(notebook.coverId)
@@ -936,6 +1048,7 @@ private fun ShelfNotebookCard(
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename() })
+                    DropdownMenuItem(text = { Text("Tags…") }, onClick = { menuOpen = false; onTags() })
                     if (onRead != null) {
                         DropdownMenuItem(
                             text = { Text("Read book") },
@@ -972,6 +1085,14 @@ private fun ShelfNotebookCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (showPageMatch) {
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "· in pages",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             if (notebook.type == NoteType.CLASSROOM) {
                 Spacer(Modifier.width(4.dp))
                 Icon(
@@ -1289,9 +1410,94 @@ private fun CategoryOption(
     }
 }
 
+/** Tag assignment dialog for one notebook (checkbox list + create + delete). */
 @Composable
-private fun CategoryEditDialog(
-    title: String,
+private fun TagsDialog(
+    notebookTitle: String,
+    allTags: List<Tag>,
+    checkedIds: Set<Long>,
+    onCheckedChange: (Set<Long>) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+    onCreateTag: (String) -> Unit,
+    onDeleteTag: (Long) -> Unit,
+) {
+    var newName by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Tags · $notebookTitle") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (allTags.isEmpty()) {
+                    Text(
+                        "No tags yet — create the first one below.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                allTags.forEach { tag ->
+                    val checked = tag.id in checkedIds
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                onCheckedChange(
+                                    if (checked) checkedIds - tag.id else checkedIds + tag.id
+                                )
+                            }
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                    ) {
+                        Checkbox(
+                            checked = checked,
+                            onCheckedChange = null,
+                        )
+                        Icon(
+                            Icons.Filled.Label,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${tag.name} (${tag.notebookCount})",
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { onDeleteTag(tag.id) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete tag")
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("New tag") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            onCreateTag(newName)
+                            newName = ""
+                        },
+                        enabled = newName.isNotBlank(),
+                    ) { Text("Add") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onSave) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun CategoryEditDialog(    title: String,
     initial: String = "",
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,

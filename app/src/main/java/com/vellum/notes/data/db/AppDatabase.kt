@@ -6,8 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [NotebookEntity::class, PageEntity::class, CategoryEntity::class, BookHighlightEntity::class],
-    version = 5,
+    entities = [NotebookEntity::class, PageEntity::class, CategoryEntity::class, BookHighlightEntity::class, TagEntity::class, NotebookTagCrossRef::class, PageSearchEntity::class],
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -16,6 +16,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun pageDao(): PageDao
     abstract fun categoryDao(): CategoryDao
     abstract fun highlightDao(): HighlightDao
+    abstract fun tagDao(): TagDao
+    abstract fun pageSearchDao(): PageSearchDao
 
     companion object {
         @Volatile
@@ -28,7 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "vellum.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                     .also { instance = it }
             }
@@ -83,6 +85,39 @@ abstract class AppDatabase : RoomDatabase() {
             )
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_book_highlights_notebookId` ON `book_highlights` (`notebookId`)")
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_book_highlights_pageId` ON `book_highlights` (`pageId`)")
+        }
+
+        /**
+         * v5 → v6: tags + full-text search. Two plain tables plus one FTS4 index
+         * table (maintained manually — FTS tables cannot use foreign keys).
+         */
+        val MIGRATION_5_6 = androidx.room.migration.Migration(5, 6) { db ->
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS tags (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`name` TEXT NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS notebook_tags (" +
+                    "`notebookId` INTEGER NOT NULL, `tagId` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`notebookId`, `tagId`), " +
+                    "FOREIGN KEY(`notebookId`) REFERENCES `notebooks`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE, " +
+                    "FOREIGN KEY(`tagId`) REFERENCES `tags`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE)"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_notebook_tags_tagId` ON `notebook_tags` (`tagId`)")
+            db.execSQL(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS page_search USING FTS4(" +
+                    "`pageId` INTEGER NOT NULL, `notebookId` INTEGER NOT NULL, " +
+                    "`title` TEXT NOT NULL, `body` TEXT NOT NULL)"
+            )
+            // Backfill titles for pre-existing pages so title search works
+            // immediately; bodies are indexed on the next content save.
+            db.execSQL(
+                "INSERT INTO page_search (pageId, notebookId, title, body) " +
+                    "SELECT `id`, `notebookId`, `title`, '' FROM pages"
+            )
         }
     }
 }

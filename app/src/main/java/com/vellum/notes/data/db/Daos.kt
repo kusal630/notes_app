@@ -131,6 +131,84 @@ interface HighlightDao {
 }
 
 @Dao
+interface TagDao {
+
+    @Query(
+        """
+        SELECT t.*, (SELECT COUNT(*) FROM notebook_tags nt
+                     JOIN notebooks n ON n.id = nt.notebookId
+                     WHERE nt.tagId = t.id AND n.deletedAt IS NULL) AS notebookCount
+        FROM tags t
+        ORDER BY t.name COLLATE NOCASE ASC
+        """
+    )
+    fun observeTags(): Flow<List<TagRow>>
+
+    @Query("SELECT t.* FROM tags t JOIN notebook_tags nt ON nt.tagId = t.id WHERE nt.notebookId = :notebookId ORDER BY t.name COLLATE NOCASE ASC")
+    suspend fun tagsForNotebook(notebookId: Long): List<TagEntity>
+
+    @Query("SELECT * FROM tags WHERE name = :name COLLATE NOCASE")
+    suspend fun findByName(name: String): TagEntity?
+
+    @Insert
+    suspend fun insert(tag: TagEntity): Long
+
+    @Query("UPDATE tags SET name = :name WHERE id = :id")
+    suspend fun rename(id: Long, name: String)
+
+    @Query("DELETE FROM tags WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Insert(onConflict = androidx.room.OnConflictStrategy.IGNORE)
+    suspend fun assign(crossRef: NotebookTagCrossRef)
+
+    @Query("DELETE FROM notebook_tags WHERE notebookId = :notebookId AND tagId = :tagId")
+    suspend fun unassign(notebookId: Long, tagId: Long)
+
+    @Query("DELETE FROM notebook_tags WHERE notebookId = :notebookId")
+    suspend fun clearNotebook(notebookId: Long)
+}
+
+@Dao
+interface PageSearchDao {
+
+    @Insert
+    suspend fun insert(row: PageSearchEntity)
+
+    @Query("DELETE FROM page_search WHERE pageId = :pageId")
+    suspend fun deleteForPage(pageId: Long)
+
+    @Query("DELETE FROM page_search WHERE notebookId = :notebookId")
+    suspend fun deleteForNotebook(notebookId: Long)
+
+    /** Drops index rows whose pages belong to trashed notebooks. */
+    @Query(
+        """
+        DELETE FROM page_search WHERE pageId IN (
+            SELECT p.id FROM pages p
+            JOIN notebooks n ON n.id = p.notebookId
+            WHERE n.deletedAt IS NOT NULL
+        )
+        """
+    )
+    suspend fun deleteForTrash()
+
+    /**
+     * Notebook ids with at least one page matching the FTS query. [matchQuery]
+     * must be pre-sanitized (see SearchIndex.sanitizeQuery) — raw user input
+     * can break FTS syntax.
+     */
+    @Query(
+        """
+        SELECT DISTINCT p.notebookId FROM pages p
+        JOIN page_search s ON s.pageId = p.id
+        WHERE page_search MATCH :matchQuery
+        """
+    )
+    suspend fun searchNotebookIds(matchQuery: String): List<Long>
+}
+
+@Dao
 interface PageDao {
 
     @Query("SELECT * FROM pages WHERE notebookId = :notebookId ORDER BY `order` ASC")

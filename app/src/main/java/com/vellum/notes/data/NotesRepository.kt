@@ -6,6 +6,7 @@ import com.vellum.notes.model.Notebook
 import com.vellum.notes.model.NoteType
 import com.vellum.notes.model.PageContent
 import com.vellum.notes.model.PageSummary
+import com.vellum.notes.model.Tag
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -74,4 +75,24 @@ interface NotesRepository {
     suspend fun addHighlight(highlight: BookHighlight): Long
     suspend fun deleteHighlight(id: Long)
     suspend fun clearPageHighlights(pageId: Long)
+
+    /** All tags with live notebook counts, sorted A–Z. */
+    val allTags: Flow<List<Tag>>
+
+    /** Tags on one notebook, sorted A–Z. */
+    suspend fun tagsForNotebook(notebookId: Long): List<Tag>
+
+    /** Creates a tag (reuses the existing one case-insensitively). */
+    suspend fun createTag(name: String): Long
+    suspend fun renameTag(id: Long, name: String)
+    suspend fun deleteTag(id: Long)
+
+    /** Replaces a notebook's tag set. */
+    suspend fun setNotebookTags(notebookId: Long, tagIds: Set<Long>)
+
+    /**
+     * Notebook ids with at least one page whose title or text matches [query]
+     * (full-text search over titles, typed text, transcripts, summaries).
+     */
+    suspend fun searchPageTexts(query: String): List<Long>
 }
