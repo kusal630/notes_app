@@ -258,27 +258,33 @@ fun DiagnosticsScreen(
                     }
                 }
 
-                if (settings.palmZone.mode == PalmZoneMode.AUTO) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SingleChoiceSegmentedButtonRow {
-                            WritingPosture.entries.forEachIndexed { index, posture ->
-                                SegmentedButton(
-                                    selected = settings.writingPosture == posture,
-                                    onClick = { scope.launch {
-                                        settingsRepository.updateSettings {
-                                            val updated = withWritingPosture(posture)
-                                            writingPosture = updated.writingPosture
-                                            palmZone = updated.palmZone
-                                        }
-                                    } },
-                                shape = SegmentedButtonDefaults.itemShape(index = index, count = WritingPosture.entries.size),
-                                ) { Text(humanizePosture(posture)) }
-                            }
+                Text(
+                    "Writing hand (biases edge-resting evidence in every zone mode):",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SingleChoiceSegmentedButtonRow {
+                        WritingPosture.entries.forEachIndexed { index, posture ->
+                            SegmentedButton(
+                                selected = settings.writingPosture == posture,
+                                onClick = { scope.launch {
+                                    settingsRepository.updateSettings {
+                                        val updated = withWritingPosture(posture)
+                                        writingPosture = updated.writingPosture
+                                        palmZone = updated.palmZone
+                                    }
+                                } },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = WritingPosture.entries.size),
+                            ) { Text(humanizePosture(posture)) }
                         }
                     }
+                }
+
+                if (settings.palmZone.mode == PalmZoneMode.AUTO) {
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)

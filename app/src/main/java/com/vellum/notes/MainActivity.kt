@@ -515,6 +515,27 @@ fun SettingsContent(
         )
         Spacer(Modifier.height(12.dp))
 
+        Text("Writing hand", style = MaterialTheme.typography.bodyLarge)
+        Spacer(Modifier.height(8.dp))
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            WritingPosture.entries.forEachIndexed { index, posture ->
+                SegmentedButton(
+                    selected = settings.writingPosture == posture,
+                    onClick = { onSettingChange(settings.withWritingPosture(posture)) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = WritingPosture.entries.size)
+                ) { Text(posture.label) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Right-handed keeps full resting evidence on the right edge; left-handed " +
+                "mirrors it. Two-handed applies no bias. Applies in every zone mode; " +
+                "changing it also syncs the palm-side default below.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+
         Text("Zone mode", style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(8.dp))
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -535,25 +556,6 @@ fun SettingsContent(
         )
 
         if (settings.palmZone.mode == PalmZoneMode.AUTO) {
-            Spacer(Modifier.height(12.dp))
-            Text("Writing hand", style = MaterialTheme.typography.bodyLarge)
-            Spacer(Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                WritingPosture.entries.forEachIndexed { index, posture ->
-                    SegmentedButton(
-                        selected = settings.writingPosture == posture,
-                        onClick = { onSettingChange(settings.withWritingPosture(posture)) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = WritingPosture.entries.size)
-                    ) { Text(posture.label) }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Right-handed keeps full resting evidence on the right edge; left-handed " +
-                    "mirrors it. Two-handed applies no bias.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Spacer(Modifier.height(12.dp))
             Text("Palm side (which side of the pen your palm rests on)", style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(8.dp))

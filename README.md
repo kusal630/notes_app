@@ -51,7 +51,7 @@ Requirements: JDK 17+, Android SDK (compileSdk 35, minSdk 26, targetSdk 35). The
 # Release APK (unsigned; F-Droid signs its own builds)
 ./gradlew :app:assembleRelease
 
-# Unit tests (188 passing)
+# Unit tests (268 passing)
 ./gradlew :app:testDebugUnitTest
 ```
 
