@@ -28,7 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -95,6 +95,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -326,6 +327,16 @@ fun HomeScreen(
     var query by remember { mutableStateOf("") }
     var sortByName by remember { mutableStateOf(false) }
     var activeTagId by remember { mutableStateOf<Long?>(null) }
+    // Launch veil: warm brand splash that scales in, then fades. Never blocks
+    // touches (no input modifiers) and shows once per process lifetime of this
+    // composition.
+    var veil by remember { mutableStateOf(true) }
+    var veilIn by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        veilIn = true
+        kotlinx.coroutines.delay(900)
+        veil = false
+    }
     // Full-text page matches for the current query (notebook ids). One-shot per
     // query change; title/tag matching stays synchronous below.
     var contentHits by remember { mutableStateOf<Set<Long>>(emptySet()) }
@@ -497,6 +508,45 @@ fun HomeScreen(
                             hideTitle = true,
                         )
                     }
+                }
+            }
+        }
+        // Launch veil over everything (non-blocking: touches pass through).
+        androidx.compose.animation.AnimatedVisibility(
+            visible = veil,
+            exit = androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(400)
+            ),
+        ) {
+            val scale by androidx.compose.animation.core.animateFloatAsState(
+                targetValue = if (veilIn) 1f else 0.7f,
+                animationSpec = androidx.compose.animation.core.spring(
+                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessLow,
+                ),
+                label = "veilScale",
+            )
+            Box(
+                Modifier.fillMaxSize().background(Color(0xFFF7EBCB)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "Vellum",
+                        style = MaterialTheme.typography.displayMedium.copy(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = Color(0xFF4E342E),
+                        modifier = Modifier.graphicsLayer(scaleX = scale, scaleY = scale),
+                    )
+                    Text(
+                        "offline notes",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                        ),
+                        color = Color(0xFF8D6E63),
+                    )
                 }
             }
         }
@@ -1120,6 +1170,10 @@ private fun HomeContent(
                 }
             }
         } else {
+            // Staggered shelf entrance: replays per section, capped so large
+            // shelves don't cascade forever.
+            var enter by remember(section) { mutableStateOf(false) }
+            LaunchedEffect(section) { enter = true }
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(160.dp),
                 modifier = Modifier.fillMaxSize(),
@@ -1127,7 +1181,16 @@ private fun HomeContent(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                items(visible, key = { it.id }) { nb ->
+                itemsIndexed(visible, key = { _, nb -> nb.id }) { index, nb ->
+                    val delay = (index % 12) * 35
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = enter,
+                        enter = androidx.compose.animation.fadeIn(
+                            animationSpec = androidx.compose.animation.core.tween(250, delayMillis = delay)
+                        ) + androidx.compose.animation.slideInVertically(
+                            animationSpec = androidx.compose.animation.core.tween(250, delayMillis = delay)
+                        ) { it / 4 },
+                    ) {
                     if (inTrash) {
                         TrashCard(
                             notebook = nb,
@@ -1174,6 +1237,7 @@ private fun HomeContent(
                                 !nb.title.contains(query, ignoreCase = true) &&
                                 contentHits.contains(nb.id),
                         )
+                    }
                     }
                 }
             }
