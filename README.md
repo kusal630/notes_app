@@ -4,7 +4,7 @@
 
 Write naturally with a stylus or your finger. Raw touch input is analyzed in real time to reliably ignore palm rests, so only your pen or writing finger leaves ink — no proprietary or cloud service required. Everything stays on your device: notes, ink, images, transcripts.
 
-> ⬇️ **Download:** grab the latest APK from [**Releases**](https://github.com/kusal630/vellum/releases) (`vellum-v1.0.0-debug.apk`, debug-signed, ~102MB — includes the on-device speech model).
+> ⬇️ **Download:** grab the latest APK from [**Releases**](https://github.com/kusal630/vellum/releases) (`vellum-v1.2.0-debug.apk`, debug-signed, ~102MB — includes the on-device speech model).
 
 ## ✨ Features
 
@@ -54,7 +54,7 @@ Requirements: JDK 17+, Android SDK (compileSdk 35, minSdk 26, targetSdk 35). The
 # Release APK (unsigned; F-Droid signs its own builds)
 ./gradlew :app:assembleRelease
 
-# Unit tests (268 passing)
+# Unit tests (327 passing)
 ./gradlew :app:testDebugUnitTest
 ```
 
