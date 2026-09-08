@@ -9,10 +9,10 @@ import kotlin.math.min
 /**
  * Handwriting-to-text conversion (Nebo-style select + Convert).
  *
- * The recognition engine itself stays stubbed offline: [Recognizer] is a seam
- * where an on-device engine plugs in later, and [StubRecognizer] returns empty
- * text so the UI opens the new text box for editing immediately. All geometry
- * here is pure and unit-testable.
+ * The on-device engine is [InkRecognizer] ($1-style print matching, no
+ * network); [Recognizer] stays a seam so tests and future engines can plug in,
+ * and [StubRecognizer] keeps the "empty box for manual edit" path. All
+ * geometry here is pure and unit-testable.
  */
 object HandwritingConvert {
 

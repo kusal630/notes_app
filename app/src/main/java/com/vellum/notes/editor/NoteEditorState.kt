@@ -136,14 +136,14 @@ class NoteEditorState(
 
     /**
      * Nebo-style convert: replaces the selected ink strokes + shapes with one
-     * editable text box (recognition engine is stubbed, so the box starts with
-     * [recognizedText] — usually empty — and the UI opens it for editing).
-     * Single undo step. Returns the new text id, or 0 when nothing convertible
-     * is selected.
+     * editable text box. The on-device [InkRecognizer] transcribes print
+     * (A–Z, 0–9; "?" marks anything below confidence) and the UI opens the box
+     * for editing. Single undo step. Returns the new text id, or 0 when nothing
+     * convertible is selected.
      */
     fun convertSelectionToText(
         recognizedText: String = "",
-        recognizer: HandwritingConvert.Recognizer = HandwritingConvert.StubRecognizer,
+        recognizer: HandwritingConvert.Recognizer = InkRecognizer,
     ): Long {
         val ids = _selectedIds.value
         if (ids.isEmpty()) return 0L
