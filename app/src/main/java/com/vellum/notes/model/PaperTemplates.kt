@@ -43,10 +43,12 @@ object PaperTemplates {
     fun backgroundFor(id: String?, darkTheme: Boolean = false): PageBackground {
         val t = byId(id)
         return if (!darkTheme) {
+            // Nebo-style warm paper: subtle tint reads as paper next to a pure-white
+            // UI while black/blue ink keeps full contrast.
             PageBackground(
                 type = t.type,
-                colorArgb = 0xFFFFFFFF,
-                lineColorArgb = 0xFFB8C6E0,
+                colorArgb = 0xFFFAF6EE,
+                lineColorArgb = 0xFFC9BFA8,
                 lineSpacingMm = t.lineSpacingMm,
                 gridSizeMm = t.gridSizeMm,
                 dotSpacingMm = t.dotSpacingMm,

@@ -42,7 +42,7 @@ class Wave1ModelsTest {
     fun backgroundFor_lightVsDark_usesInkFriendlyColors() {
         val light = PaperTemplates.backgroundFor("RULED", darkTheme = false)
         val dark = PaperTemplates.backgroundFor("RULED", darkTheme = true)
-        assertEquals(0xFFFFFFFF, light.colorArgb)
+        assertEquals(0xFFFAF6EE, light.colorArgb)
         assertEquals(0xFF141821, dark.colorArgb)
         assertTrue(dark.lineColorArgb != light.lineColorArgb)
         assertEquals(8f, light.lineSpacingMm)

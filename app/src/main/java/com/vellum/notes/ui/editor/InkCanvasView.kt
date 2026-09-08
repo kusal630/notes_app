@@ -748,16 +748,20 @@ class InkCanvasView @JvmOverloads constructor(
                         // bottom viewport edges so writing flows like a real notebook instead
                         // of forcing the user to create a new page. The world point for THIS
                         // event is computed before scrolling, so strokes stay continuous.
+                        // Deadband + clamp (ViewportScroll): without them the page bounced
+                        // up and down around the margin and could scroll past the content.
                         val h = height.toFloat()
-                        val margin = 150f
-                        val penY = contact.contact.y
-                        val shiftY = when {
-                            penY > h - margin -> penY - (h - margin)
-                            penY < margin -> penY - margin
-                            else -> 0f
-                        }
+                        val shiftY = com.vellum.notes.editor.ViewportScroll.shiftFor(
+                            penYPx = contact.contact.y,
+                            heightPx = h,
+                        )
                         if (shiftY != 0f) {
-                            offsetY -= shiftY
+                            offsetY = com.vellum.notes.editor.ViewportScroll.clampOffset(
+                                offsetPx = offsetY - shiftY,
+                                extentMm = contentExtentMm(),
+                                scale = scale,
+                                heightPx = h,
+                            )
                             listener?.onViewportChanged(zoom, offsetX, offsetY)
                         }
                         val worldX = screenToWorldX(contact.contact.x)

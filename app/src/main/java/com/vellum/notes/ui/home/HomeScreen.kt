@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,6 +34,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Fill
@@ -77,6 +81,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.vellum.notes.data.NotesRepository
 import com.vellum.notes.data.BackupManager
@@ -490,7 +495,7 @@ private fun NewNoteDialog(
         onDismissRequest = onDismiss,
         title = { Text("New note") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") })
                 Spacer(Modifier.height(12.dp))
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -505,7 +510,10 @@ private fun NewNoteDialog(
                 Spacer(Modifier.height(12.dp))
                 Text("Cover", style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     NotebookCovers.ALL.forEach { cover ->
                         val selected = cover.id == coverId
                         Box(
@@ -529,13 +537,33 @@ private fun NewNoteDialog(
                 Spacer(Modifier.height(12.dp))
                 Text("Paper", style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(6.dp))
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    PaperTemplates.ALL.forEachIndexed { index, t ->
-                        SegmentedButton(
-                            selected = templateId == t.id,
-                            onClick = { templateId = t.id },
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = PaperTemplates.ALL.size),
-                        ) { Text(t.label, style = MaterialTheme.typography.labelSmall) }
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PaperTemplates.ALL.forEach { t ->
+                        val selected = templateId == t.id
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant,
+                                    shape = RoundedCornerShape(14.dp),
+                                )
+                                .clickable { templateId = t.id }
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(t.label, style = MaterialTheme.typography.labelLarge)
+                        }
                     }
                 }
                 Spacer(Modifier.height(8.dp))
