@@ -3,8 +3,10 @@ package com.vellum.notes
 import android.app.Application
 import com.vellum.notes.data.NotesRepository
 import com.vellum.notes.data.SettingsRepository
+import com.vellum.notes.data.SyncRepository
 import com.vellum.notes.data.createRepository
 import com.vellum.notes.data.settingsDataStore
+import com.vellum.notes.data.syncDataStore
 import com.vellum.notes.input.PalmRejectionEngine
 import com.vellum.notes.input.InputCapabilities
 import com.vellum.notes.input.PalmRejectionSettings
@@ -22,6 +24,7 @@ class AppContainer(private val application: Application) {
 
     private val dataStore = application.settingsDataStore()
     val settingsRepository = SettingsRepository(dataStore)
+    val syncRepository = SyncRepository(application.syncDataStore())
 
     /** Latest persisted settings, cached for synchronous reads by the input engine. */
     @Volatile

@@ -49,6 +49,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.vellum.notes.data.NotesRepository
 import com.vellum.notes.data.SettingsRepository
+import com.vellum.notes.data.SyncRepository
 import com.vellum.notes.input.InputCapabilities
 import com.vellum.notes.input.PalmRejectionEngine
 import com.vellum.notes.input.PalmRejectionMode
@@ -64,6 +65,7 @@ import com.vellum.notes.ui.editor.EditorScreen
 import com.vellum.notes.ui.home.HomeScreen
 import com.vellum.notes.ui.reader.HighlightsScreen
 import com.vellum.notes.ui.reader.ReadModeScreen
+import com.vellum.notes.ui.sync.SyncSection
 import com.vellum.notes.ui.theme.VellumTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -128,8 +130,11 @@ fun NotesAppRoot() {
             )
         }
         composable(Routes.SETTINGS) {
+            val app = LocalContext.current.applicationContext as VellumApp
             SettingsScreen(
-                settingsRepository = (LocalContext.current.applicationContext as VellumApp).container.settingsRepository,
+                settingsRepository = app.container.settingsRepository,
+                syncRepository = app.container.syncRepository,
+                notesRepository = app.container.notesRepository,
                 onBack = { navController.popBackStack() }
             )
         }
@@ -172,6 +177,8 @@ fun NotesAppRoot() {
 @Composable
 fun SettingsScreen(
     settingsRepository: SettingsRepository,
+    syncRepository: SyncRepository,
+    notesRepository: NotesRepository,
     onBack: () -> Unit,
 ) {
     val settings by settingsRepository.settingsFlow.collectAsState(initial = PalmRejectionSettings())
@@ -221,9 +228,16 @@ fun SettingsScreen(
                         this.allowImmediateDrawWhenIsolated = newSettings.allowImmediateDrawWhenIsolated
                         this.debugOverlayEnabled = newSettings.debugOverlayEnabled
                         this.scribbleSensitivity = newSettings.scribbleSensitivity
+                        this.writingPosture = newSettings.writingPosture
+                        this.pressureAssistEnabled = newSettings.pressureAssistEnabled
+                        this.autoEraseEnabled = newSettings.autoEraseEnabled
+                        this.calibration = newSettings.calibration
                     }
                 }
-            })
+            },
+            syncRepository = syncRepository,
+            notesRepository = notesRepository,
+            )
         }
     }
 }
@@ -233,6 +247,8 @@ fun SettingsScreen(
 fun SettingsContent(
     settings: PalmRejectionSettings,
     onSettingChange: (PalmRejectionSettings) -> Unit,
+    syncRepository: SyncRepository,
+    notesRepository: NotesRepository,
 ) {
     Column(Modifier.padding(16.dp).fillMaxSize().verticalScroll(rememberScrollState())) {
         SettingsSectionTitle("Writing")
@@ -635,6 +651,13 @@ fun SettingsContent(
                 ) { Text(sm.name) }
             }
         }
+
+        SettingsSectionDivider()
+        SettingsSectionTitle("Device Sync")
+        SyncSection(
+            syncRepository = syncRepository,
+            notesRepository = notesRepository,
+        )
     }
 }
 
