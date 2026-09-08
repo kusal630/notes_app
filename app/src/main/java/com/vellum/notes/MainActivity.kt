@@ -42,9 +42,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.vellum.notes.data.NotesRepository
 import com.vellum.notes.data.SettingsRepository
 import com.vellum.notes.input.InputCapabilities
@@ -60,6 +62,8 @@ import com.vellum.notes.input.withWritingPosture
 import com.vellum.notes.ui.diagnostics.DiagnosticsScreen
 import com.vellum.notes.ui.editor.EditorScreen
 import com.vellum.notes.ui.home.HomeScreen
+import com.vellum.notes.ui.reader.HighlightsScreen
+import com.vellum.notes.ui.reader.ReadModeScreen
 import com.vellum.notes.ui.theme.VellumTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -69,8 +73,12 @@ object Routes {
     const val EDITOR = "editor/{notebookId}"
     const val DIAGNOSTICS = "diagnostics"
     const val SETTINGS = "settings"
+    const val READ = "read/{notebookId}?pageId={pageId}"
+    const val HIGHLIGHTS = "highlights"
 
     fun editor(notebookId: Long) = "editor/$notebookId"
+    fun read(notebookId: Long, pageId: Long? = null) =
+        if (pageId == null) "read/$notebookId" else "read/$notebookId?pageId=$pageId"
 }
 
 class MainActivity : ComponentActivity() {
@@ -96,7 +104,8 @@ fun NotesAppRoot() {
                 repository = container.notesRepository,
                 onOpenNotebook = { navController.navigate(Routes.editor(it)) },
                 onOpenDiagnostics = { navController.navigate(Routes.DIAGNOSTICS) },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenReader = { navController.navigate(Routes.read(it)) },
             )
         }
         composable(Routes.EDITOR) { backStackEntry ->
@@ -122,6 +131,38 @@ fun NotesAppRoot() {
             SettingsScreen(
                 settingsRepository = (LocalContext.current.applicationContext as VellumApp).container.settingsRepository,
                 onBack = { navController.popBackStack() }
+            )
+        }
+        composable(
+            Routes.READ,
+            arguments = listOf(
+                navArgument("notebookId") { type = NavType.StringType },
+                navArgument("pageId") {
+                    type = NavType.StringType
+                    nullable = true
+                },
+            ),
+        ) { backStackEntry ->
+            val notebookId = backStackEntry.arguments?.getString("notebookId")?.toLongOrNull() ?: 0L
+            val pageId = backStackEntry.arguments?.getString("pageId")?.toLongOrNull()
+            ReadModeScreen(
+                notebookId = notebookId,
+                startPageId = pageId,
+                repository = container.notesRepository,
+                onBack = { navController.popBackStack() },
+                onOpenHighlights = { navController.navigate(Routes.HIGHLIGHTS) },
+            )
+        }
+        composable(Routes.HIGHLIGHTS) {
+            HighlightsScreen(
+                repository = container.notesRepository,
+                onOpenHighlight = { notebookId, pageId ->
+                    navController.navigate(Routes.read(notebookId, pageId)) {
+                        // Reading replaces the review on the stack so Back returns home.
+                        popUpTo(Routes.HIGHLIGHTS) { inclusive = true }
+                    }
+                },
+                onBack = { navController.popBackStack() },
             )
         }
     }

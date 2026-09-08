@@ -20,6 +20,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | 🔍 Organize | Noteshelf home (sidebar + categories, Starred/Unfiled/Trash/Archived), Quick Note, search, Recent / A–Z sort |
 | 💾 Backup | One-tap local ZIP export (database + images + PDF pages) to your own folder — no cloud |
 | 📥 PDF | Import & annotate any PDF offline; export preserves italic/underline/alignment; reader themes + auto-trim coming |
+| 📖 Read mode | Read imported books full-screen (Original/Sepia/Night), freehand highlighter in 4 colors, tap-erase, every highlight saved per page + searchable review list that jumps back to the exact page |
 | 🎙️ Classroom | Optional on-device recording with live Vosk transcription + summary, saved with the note |
 | 🎨 Canvas | Infinite canvas, pinch-to-zoom + pan, undo/redo (incl. two-finger double-tap), viewport-culled display list (off-screen ink skipped, zero-allocation draw path, surgical partial invalidation while writing), no auto-scroll (viewport moves only by pan/zoom/scroll bar), light & dark themes |
 | ✍️ Convert | Select ink → **Convert** to an editable text box (single undo step; on-device engine stubbed) |

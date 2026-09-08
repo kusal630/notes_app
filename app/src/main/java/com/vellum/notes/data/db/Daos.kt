@@ -77,7 +77,6 @@ interface NotebookDao {
 
 @Dao
 interface CategoryDao {
-
     @Query(
         """
         SELECT c.*, (SELECT COUNT(*) FROM notebooks n
@@ -99,6 +98,36 @@ interface CategoryDao {
 
     @Query("DELETE FROM categories WHERE id = :id")
     suspend fun delete(id: Long)
+}
+
+@Dao
+interface HighlightDao {
+
+    @Query(
+        """
+        SELECT h.*, n.title AS notebookTitle, p.title AS pageTitle
+        FROM book_highlights h
+        JOIN notebooks n ON n.id = h.notebookId
+        JOIN pages p ON p.id = h.pageId
+        ORDER BY h.createdAt DESC
+        """
+    )
+    fun observeAll(): Flow<List<BookHighlightRow>>
+
+    @Query("SELECT * FROM book_highlights WHERE notebookId = :notebookId ORDER BY createdAt ASC")
+    fun observeForNotebook(notebookId: Long): Flow<List<BookHighlightEntity>>
+
+    @Query("SELECT * FROM book_highlights WHERE pageId = :pageId ORDER BY createdAt ASC")
+    suspend fun forPage(pageId: Long): List<BookHighlightEntity>
+
+    @Insert
+    suspend fun insert(highlight: BookHighlightEntity): Long
+
+    @Query("DELETE FROM book_highlights WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM book_highlights WHERE pageId = :pageId")
+    suspend fun clearPage(pageId: Long)
 }
 
 @Dao

@@ -6,8 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [NotebookEntity::class, PageEntity::class, CategoryEntity::class],
-    version = 4,
+    entities = [NotebookEntity::class, PageEntity::class, CategoryEntity::class, BookHighlightEntity::class],
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -15,6 +15,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun notebookDao(): NotebookDao
     abstract fun pageDao(): PageDao
     abstract fun categoryDao(): CategoryDao
+    abstract fun highlightDao(): HighlightDao
 
     companion object {
         @Volatile
@@ -27,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "vellum.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }
@@ -62,6 +63,26 @@ abstract class AppDatabase : RoomDatabase() {
                     "(`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
                     "`name` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)"
             )
+        }
+
+        /**
+         * v4 → v5: read-mode highlights. A new table with cascading foreign keys;
+         * no existing data is touched.
+         */
+        val MIGRATION_4_5 = androidx.room.migration.Migration(4, 5) { db ->
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS book_highlights (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`notebookId` INTEGER NOT NULL, `pageId` INTEGER NOT NULL, " +
+                    "`pointsJson` TEXT NOT NULL DEFAULT '[]', " +
+                    "`colorArgb` INTEGER NOT NULL DEFAULT 0, `createdAt` INTEGER NOT NULL DEFAULT 0, " +
+                    "FOREIGN KEY(`notebookId`) REFERENCES `notebooks`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE, " +
+                    "FOREIGN KEY(`pageId`) REFERENCES `pages`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE)"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_book_highlights_notebookId` ON `book_highlights` (`notebookId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_book_highlights_pageId` ON `book_highlights` (`pageId`)")
         }
     }
 }

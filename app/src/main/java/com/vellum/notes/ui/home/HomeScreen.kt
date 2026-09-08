@@ -78,6 +78,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -107,6 +108,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -136,6 +138,7 @@ fun HomeScreen(
     onOpenNotebook: (Long) -> Unit,
     onOpenDiagnostics: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenReader: (Long) -> Unit,
 ) {
     val notebooks by repository.notebooks.collectAsState(initial = emptyList())
     val trashed by repository.trashedNotebooks.collectAsState(initial = emptyList())
@@ -284,6 +287,7 @@ fun HomeScreen(
                     },
                     onNewNotebook = { showNewDialog = true },
                     onImportFile = { pdfPicker.launch(arrayOf("application/pdf")) },
+                    onOpenReader = onOpenReader,
                     importing = pdfImporting,
                     onEdit = { editing = it },
                     onMove = { moving = it },
@@ -350,6 +354,7 @@ fun HomeScreen(
                             },
                             onNewNotebook = { showNewDialog = true },
                             onImportFile = { pdfPicker.launch(arrayOf("application/pdf")) },
+                            onOpenReader = onOpenReader,
                             importing = pdfImporting,
                             onEdit = { editing = it },
                             onMove = { moving = it },
@@ -684,6 +689,7 @@ private fun HomeContent(
     onQuickNote: () -> Unit,
     onNewNotebook: () -> Unit,
     onImportFile: () -> Unit,
+    onOpenReader: (Long) -> Unit,
     importing: Boolean,
     onEdit: (Notebook) -> Unit,
     onMove: (Notebook) -> Unit,
@@ -818,6 +824,15 @@ private fun HomeContent(
                             },
                         )
                     } else {
+                        // Read entry is one-shot per card: readable iff the notebook
+                        // has at least one rasterized PDF page.
+                        var pdfBacked by remember(nb.id) { mutableStateOf(false) }
+                        LaunchedEffect(nb.id) {
+                            pdfBacked = runCatching {
+                                repository.pagesFor(nb.id).first()
+                                    .any { it.pdfBackgroundPath.isNotBlank() }
+                            }.getOrDefault(false)
+                        }
                         ShelfNotebookCard(
                             notebook = nb,
                             onClick = { onOpenNotebook(nb.id) },
@@ -835,6 +850,11 @@ private fun HomeContent(
                             onChangeCover = { onChangeCover(nb) },
                             onTrash = {
                                 scope.launch { repository.deleteNotebook(nb.id) }
+                            },
+                            onRead = if (pdfBacked) {
+                                { onOpenReader(nb.id) }
+                            } else {
+                                null
                             },
                         )
                     }
@@ -879,6 +899,7 @@ private fun ShelfNotebookCard(
     onArchive: () -> Unit,
     onChangeCover: () -> Unit,
     onTrash: () -> Unit,
+    onRead: (() -> Unit)? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val cover = NotebookCovers.byId(notebook.coverId)
@@ -915,6 +936,12 @@ private fun ShelfNotebookCard(
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename() })
+                    if (onRead != null) {
+                        DropdownMenuItem(
+                            text = { Text("Read book") },
+                            onClick = { menuOpen = false; onRead() },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(if (notebook.isFavorite) "Unstar" else "Star") },
                         onClick = { menuOpen = false; onToggleFavorite() },

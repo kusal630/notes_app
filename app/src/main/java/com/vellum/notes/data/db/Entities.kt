@@ -78,3 +78,43 @@ data class CategoryRow(
     @Embedded val category: CategoryEntity,
     val notebookCount: Int = 0,
 )
+
+/**
+ * One freehand highlight stroke in read mode, stored in page-relative coordinates
+ * (0..1 of the page image) so it survives crops, rotations and re-rasterization.
+ * Cascades with both the notebook and the page.
+ */
+@Entity(
+    tableName = "book_highlights",
+    foreignKeys = [
+        ForeignKey(
+            entity = NotebookEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["notebookId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = PageEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["pageId"],
+            onDelete = ForeignKey.CASCADE,
+        )
+    ],
+    indices = [Index("notebookId"), Index("pageId")],
+)
+data class BookHighlightEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val notebookId: Long,
+    val pageId: Long,
+    /** JSON array of [x0,y0,x1,y1,…] in page-relative coordinates. */
+    val pointsJson: String = "[]",
+    val colorArgb: Long = 0x66FFEB3B,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+/** Highlight + the titles needed for the review list, produced by the observing query. */
+data class BookHighlightRow(
+    @Embedded val highlight: BookHighlightEntity,
+    val notebookTitle: String = "",
+    val pageTitle: String = "",
+)

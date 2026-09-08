@@ -1,5 +1,6 @@
 package com.vellum.notes.data
 
+import com.vellum.notes.model.BookHighlight
 import com.vellum.notes.model.Category
 import com.vellum.notes.model.Notebook
 import com.vellum.notes.model.NoteType
@@ -63,4 +64,14 @@ interface NotesRepository {
     suspend fun savePageContent(pageId: Long, content: PageContent)
     suspend fun getNotebook(id: Long): Notebook?
     suspend fun getPage(pageId: Long): PageSummary?
+
+    /** All read-mode highlights, newest first (review list). */
+    val allHighlights: Flow<List<BookHighlight>>
+
+    /** Highlights of one book, oldest first (read-mode overlay). */
+    fun highlightsForNotebook(notebookId: Long): Flow<List<BookHighlight>>
+
+    suspend fun addHighlight(highlight: BookHighlight): Long
+    suspend fun deleteHighlight(id: Long)
+    suspend fun clearPageHighlights(pageId: Long)
 }

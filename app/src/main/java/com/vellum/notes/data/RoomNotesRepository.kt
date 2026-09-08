@@ -2,10 +2,12 @@ package com.vellum.notes.data
 
 import android.content.Context
 import com.vellum.notes.data.db.AppDatabase
+import com.vellum.notes.data.db.BookHighlightEntity
 import com.vellum.notes.data.db.CategoryEntity
 import com.vellum.notes.data.db.NotebookEntity
 import com.vellum.notes.data.db.PageDao
 import com.vellum.notes.data.db.PageEntity
+import com.vellum.notes.model.BookHighlight
 import com.vellum.notes.model.Category
 import com.vellum.notes.model.Notebook
 import com.vellum.notes.model.NoteType
@@ -28,6 +30,7 @@ class RoomNotesRepository(private val db: AppDatabase) : NotesRepository {
     private val notebookDao = db.notebookDao()
     private val pageDao: PageDao = db.pageDao()
     private val categoryDao = db.categoryDao()
+    private val highlightDao = db.highlightDao()
 
     /** Flushes the WAL into the db file so a file-level backup is consistent. */
     suspend fun checkpoint() {
@@ -207,6 +210,55 @@ class RoomNotesRepository(private val db: AppDatabase) : NotesRepository {
 
     override suspend fun getPage(pageId: Long): PageSummary? =
         pageDao.get(pageId)?.toModel()
+
+    override val allHighlights: Flow<List<BookHighlight>> =
+        highlightDao.observeAll().map { rows ->
+            rows.map {
+                it.highlight.toModel(notebookTitle = it.notebookTitle, pageTitle = it.pageTitle)
+            }
+        }
+
+    override fun highlightsForNotebook(notebookId: Long): Flow<List<BookHighlight>> =
+        highlightDao.observeForNotebook(notebookId).map { list ->
+            list.map { it.toModel() }
+        }
+
+    override suspend fun addHighlight(highlight: BookHighlight): Long {
+        require(highlight.points.size >= 4) { "A highlight needs at least 2 points" }
+        return highlightDao.insert(
+            BookHighlightEntity(
+                notebookId = highlight.notebookId,
+                pageId = highlight.pageId,
+                pointsJson = json.encodeToString(highlight.points),
+                colorArgb = highlight.colorArgb,
+            )
+        )
+    }
+
+    override suspend fun deleteHighlight(id: Long) =
+        highlightDao.delete(id)
+
+    override suspend fun clearPageHighlights(pageId: Long) =
+        highlightDao.clearPage(pageId)
+
+    private fun BookHighlightEntity.toModel(
+        notebookTitle: String = "",
+        pageTitle: String = "",
+    ): BookHighlight {
+        val points = runCatching {
+            json.decodeFromString<List<Float>>(pointsJson)
+        }.getOrDefault(emptyList())
+        return BookHighlight(
+            id = id,
+            notebookId = notebookId,
+            pageId = pageId,
+            points = points,
+            colorArgb = colorArgb,
+            createdAt = createdAt,
+            notebookTitle = notebookTitle,
+            pageTitle = pageTitle,
+        )
+    }
 
     private fun NotebookEntity.toModel(pageCount: Int): Notebook =
         Notebook(

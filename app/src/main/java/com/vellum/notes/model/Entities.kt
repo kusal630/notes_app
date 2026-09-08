@@ -33,6 +33,23 @@ data class Category(
     val notebookCount: Int = 0,
 )
 
+/**
+ * One freehand highlight stroke in read mode. Points are page-relative (0..1 of
+ * the page image) so highlights survive crops and re-rasterization.
+ */
+data class BookHighlight(
+    val id: Long = 0L,
+    val notebookId: Long = 0L,
+    val pageId: Long = 0L,
+    val points: List<Float> = emptyList(),
+    val colorArgb: Long = 0x66FFEB3BL,
+    val createdAt: Long = System.currentTimeMillis(),
+    /** Denormalized for the review list. */
+    val notebookTitle: String = "",
+    /** Denormalized for the review list. */
+    val pageTitle: String = "",
+)
+
 /** Catalog-level page record. */
 data class PageSummary(
     val id: Long = 0L,
