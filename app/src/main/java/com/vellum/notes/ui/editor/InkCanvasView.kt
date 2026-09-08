@@ -294,6 +294,8 @@ class InkCanvasView @JvmOverloads constructor(
     // Reused scratch objects so the steady-state draw path allocates nothing per frame.
     private val worldClipRect = RectF()
     private val lassoScreenRect = RectF()
+    /** Screen-space clip of the current draw (partial under surgical invalidation). */
+    private val screenClipRect = android.graphics.Rect()
 
     private val selectionPaint = Paint().apply {
         style = Paint.Style.STROKE
@@ -874,11 +876,29 @@ class InkCanvasView @JvmOverloads constructor(
                         // Coalesced history samples (older first) carry the pointer motion
                         // the OS batched into this event; feeding them to the smoother keeps
                         // fast strokes continuous instead of dropping points.
+                        //
+                        // Surgical invalidation: only the newly added segment changed, so
+                        // the dirty region covers the previous live point plus every fed
+                        // sample (history + current). onDraw culls to the canvas clip, so
+                        // everything outside this bbox is skipped. A viewport shift moves
+                        // all content and needs a full invalidate instead.
+                        val prevLive = builder.livePoints.lastOrNull()
+                        var dirtyL = prevLive?.x ?: worldX
+                        var dirtyT = prevLive?.y ?: worldY
+                        var dirtyR = dirtyL
+                        var dirtyB = dirtyT
+                        fun extendDirty(x: Float, y: Float) {
+                            if (x < dirtyL) dirtyL = x
+                            if (y < dirtyT) dirtyT = y
+                            if (x > dirtyR) dirtyR = x
+                            if (y > dirtyB) dirtyB = y
+                        }
                         var changed = false
                         for (h in input.history) {
                             if (h.pointerId != writingId) continue
                             val hx = screenToWorldX(h.x)
                             val hy = screenToWorldY(h.y)
+                            extendDirty(hx, hy)
                             if (autoEraseEnabled) {
                                 writeEraseDetector.addSample(hx, hy, h.eventTimeNanos)
                             }
@@ -892,8 +912,23 @@ class InkCanvasView @JvmOverloads constructor(
                         if (builder.onMove(worldX, worldY, contact.contact.eventTimeNanos)) {
                             changed = true
                         }
+                        extendDirty(worldX, worldY)
                         if (changed) {
-                            invalidate()
+                            if (shiftY != 0f) {
+                                invalidate()
+                            } else {
+                                val pad = com.vellum.notes.render.DirtyRect.padForWidth(
+                                    builder.style.widthMm,
+                                )
+                                val dirty = com.vellum.notes.render.DirtyRect.segment(
+                                    dirtyL, dirtyT, dirtyR, dirtyB,
+                                    scale, offsetX, offsetY, pad,
+                                )
+                                invalidate(
+                                    (dirty.left - 2f).toInt(), (dirty.top - 2f).toInt(),
+                                    (dirty.right + 2f).toInt(), (dirty.bottom + 2f).toInt(),
+                                )
+                            }
                         }
                         // Feature 1: a deliberate tight scribble flips THIS gesture to
                         // erase. The partial stroke is committed (not lost), the erase
@@ -1124,6 +1159,19 @@ class InkCanvasView @JvmOverloads constructor(
                 invalidate()
             }
         }
+    }
+
+    /**
+     * Converts a screen-px clip rect to the world-mm culling clip under the current
+     * viewport transform. Visible for unit tests (same module); onDraw feeds it the
+     * canvas clip so partial invalidates cull correctly.
+     */
+    internal fun worldClipForClip(clip: android.graphics.Rect, out: RectF): RectF {
+        out.set(
+            (clip.left - offsetX) / scale, (clip.top - offsetY) / scale,
+            (clip.right - offsetX) / scale, (clip.bottom - offsetY) / scale,
+        )
+        return out
     }
 
     private fun worldRectToScreen(rect: RectF): RectF =
@@ -1497,6 +1545,12 @@ class InkCanvasView @JvmOverloads constructor(
         val w = width.toFloat()
         val h = height.toFloat()
 
+        // The culling clip follows the canvas clip, not the view size: under a
+        // surgical (partial) invalidate the system clips to the dirty region, so
+        // every cached layer outside it is skipped for free. A full invalidate
+        // clips to the whole view, which reduces to the previous behavior.
+        if (!canvas.getClipBounds(screenClipRect) || screenClipRect.isEmpty) return
+
         // World space: background + committed content + live strokes.
         canvas.save()
         canvas.translate(offsetX, offsetY)
@@ -1507,10 +1561,7 @@ class InkCanvasView @JvmOverloads constructor(
             background,
             pxPerMm = 1f,
             worldClip = worldClipRect.also {
-                it.set(
-                    -offsetX / scale, -offsetY / scale,
-                    (w - offsetX) / scale, (h - offsetY) / scale,
-                )
+                worldClipForClip(screenClipRect, it)
             },
         )
         // World-space viewport clip, reused for culling every cached layer below.

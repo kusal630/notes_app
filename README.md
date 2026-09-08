@@ -21,7 +21,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | 💾 Backup | One-tap local ZIP export (database + images + PDF pages) to your own folder — no cloud |
 | 📥 PDF | Import & annotate any PDF offline; export preserves italic/underline/alignment; reader themes + auto-trim coming |
 | 🎙️ Classroom | Optional on-device recording with live Vosk transcription + summary, saved with the note |
-| 🎨 Canvas | Infinite canvas, pinch-to-zoom + pan, undo/redo (incl. two-finger double-tap), viewport-culled display list (off-screen ink skipped, zero-allocation draw path), light & dark themes |
+| 🎨 Canvas | Infinite canvas, pinch-to-zoom + pan, undo/redo (incl. two-finger double-tap), viewport-culled display list (off-screen ink skipped, zero-allocation draw path, surgical partial invalidation while writing), light & dark themes |
 | ✍️ Convert | Select ink → **Convert** to an editable text box (single undo step; on-device engine stubbed) |
 | 🧪 Diagnostics | Input Labs screen for calibrating palm rejection to your hardware |
 
