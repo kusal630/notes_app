@@ -54,6 +54,8 @@ import com.vellum.notes.input.PalmRejectionSettings
 import com.vellum.notes.input.PalmZoneMode
 import com.vellum.notes.input.PalmZoneSide
 import com.vellum.notes.input.SmoothingMode
+import com.vellum.notes.input.WritingPosture
+import com.vellum.notes.input.withWritingPosture
 import com.vellum.notes.ui.diagnostics.DiagnosticsScreen
 import com.vellum.notes.ui.editor.EditorScreen
 import com.vellum.notes.ui.home.HomeScreen
@@ -502,6 +504,25 @@ fun SettingsContent(
 
         if (settings.palmZone.mode == PalmZoneMode.AUTO) {
             Spacer(Modifier.height(12.dp))
+            Text("Writing hand", style = MaterialTheme.typography.bodyLarge)
+            Spacer(Modifier.height(8.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                WritingPosture.entries.forEachIndexed { index, posture ->
+                    SegmentedButton(
+                        selected = settings.writingPosture == posture,
+                        onClick = { onSettingChange(settings.withWritingPosture(posture)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = WritingPosture.entries.size)
+                    ) { Text(posture.label) }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Right-handed keeps full resting evidence on the right edge; left-handed " +
+                    "mirrors it. Two-handed applies no bias.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
             Text("Palm side (which side of the pen your palm rests on)", style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(8.dp))
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -561,6 +582,13 @@ private val PalmZoneSide.label: String
     get() = when (this) {
         PalmZoneSide.LEFT -> "Left"
         PalmZoneSide.RIGHT -> "Right"
+    }
+
+private val WritingPosture.label: String
+    get() = when (this) {
+        WritingPosture.RIGHT_HANDED -> "Right"
+        WritingPosture.LEFT_HANDED -> "Left"
+        WritingPosture.TWO_HANDED -> "Two"
     }
 
 private fun modeHelp(mode: PalmRejectionMode): String = when (mode) {

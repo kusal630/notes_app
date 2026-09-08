@@ -106,6 +106,12 @@ data class PalmRejectionSettings(
     var candidateEvaluationWindowMs: Long = 250L,
     /** Distance (mm) from a screen edge within which a contact is considered edge-adjacent. */
     var edgeMarginMm: Float = 30f,
+    /**
+     * Which hand the user writes with. Makes the resting-hand tracker's vertical
+     * edge margins handedness-aware (see [WritingPosture]) and defaults the
+     * palm-zone side on change.
+     */
+    var writingPosture: WritingPosture = WritingPosture.RIGHT_HANDED,
     /** Max distance (mm) between two contacts for them to be part of the same resting cluster. */
     var clusterDistanceThresholdMm: Float = 45f,
     /**

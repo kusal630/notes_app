@@ -11,7 +11,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | Area | What you get |
 |---|---|
 | ✍️ Handwriting | Low-latency ink, pen + highlighter, 6 pen styles, one-tap **Smooth** cleanup |
-| 🌴 Palm rejection | Passive-stylus + finger engine: write with your palm resting — second-touch handoff, palm-sized lock rescue, per-device calibration + Labs screen |
+| 🌴 Palm rejection | Passive-stylus + finger engine: write with your palm resting — second-touch handoff, palm-sized lock rescue, writing-hand posture (right/left/two-handed edge bias), per-device calibration + Labs screen |
 | 🧰 Toolbar | Nebo-style slim top strip (icon-only 48dp) — tap the active pen to toggle its colors & thickness |
 | 🔤 Text & images | Text boxes (insert + edit), photo insertion, move / resize / duplicate |
 | 🔷 Shapes | Line, arrow, rect, circle, ellipse, triangle, star, hexagon — select, move, resize |

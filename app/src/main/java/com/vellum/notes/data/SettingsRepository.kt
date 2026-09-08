@@ -75,6 +75,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val VELOCITY_WINDOW_KEY = longPreferencesKey("velocity_window_ms")
         private val SIZE_GROWTH_CANCEL_KEY = floatPreferencesKey("size_growth_cancel_mm")
         private val IMMEDIATE_DRAW_ISOLATED_KEY = booleanPreferencesKey("immediate_draw_isolated")
+        private val WRITING_POSTURE_KEY = intPreferencesKey("writing_posture")
     }
 
     val settingsFlow: Flow<PalmRejectionSettings> = dataStore.data
@@ -124,6 +125,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             prefs[VELOCITY_WINDOW_KEY] = current.velocityWindowMs
             prefs[SIZE_GROWTH_CANCEL_KEY] = current.sizeGrowthCancelThresholdMm
             prefs[IMMEDIATE_DRAW_ISOLATED_KEY] = current.allowImmediateDrawWhenIsolated
+            prefs[WRITING_POSTURE_KEY] = current.writingPosture.ordinal
         }
     }
 
@@ -183,5 +185,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             velocityWindowMs = prefs[VELOCITY_WINDOW_KEY] ?: 120L,
             sizeGrowthCancelThresholdMm = prefs[SIZE_GROWTH_CANCEL_KEY] ?: 27.6f,
             allowImmediateDrawWhenIsolated = prefs[IMMEDIATE_DRAW_ISOLATED_KEY] ?: true,
+            writingPosture = com.vellum.notes.input.WritingPosture.entries
+                .getOrNull(prefs[WRITING_POSTURE_KEY] ?: com.vellum.notes.input.WritingPosture.RIGHT_HANDED.ordinal)
+                ?: com.vellum.notes.input.WritingPosture.RIGHT_HANDED,
         )
 }

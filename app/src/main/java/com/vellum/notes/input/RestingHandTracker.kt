@@ -167,7 +167,13 @@ class RestingHandTracker(private val capabilities: InputCapabilities) {
         fun nearEdge(c: NormalizedContact): Boolean {
             val x = c.x
             val y = c.y
-            return x <= edgePx || y <= edgePx || x >= widthPx - edgePx || y >= heightPx - edgePx
+            // Top/bottom edges are symmetric under every posture; the vertical
+            // edges are handedness-aware (see WritingPosture).
+            if (y <= edgePx || y >= heightPx - edgePx) return true
+            val posture = settings.writingPosture
+            val leftMargin = posture.horizontalEdgeMarginPx(leftEdge = true, fullMarginPx = edgePx)
+            val rightMargin = posture.horizontalEdgeMarginPx(leftEdge = false, fullMarginPx = edgePx)
+            return x <= leftMargin || x >= widthPx - rightMargin
         }
 
         fun stationaryMs(st: PointerMotionState): Long =

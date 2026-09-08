@@ -56,6 +56,8 @@ import com.vellum.notes.input.PalmRejectionSettings
 import com.vellum.notes.input.PalmZone
 import com.vellum.notes.input.PalmZoneMode
 import com.vellum.notes.input.PalmZoneSide
+import com.vellum.notes.input.WritingPosture
+import com.vellum.notes.input.withWritingPosture
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -262,6 +264,26 @@ fun DiagnosticsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         SingleChoiceSegmentedButtonRow {
+                            WritingPosture.entries.forEachIndexed { index, posture ->
+                                SegmentedButton(
+                                    selected = settings.writingPosture == posture,
+                                    onClick = { scope.launch {
+                                        settingsRepository.updateSettings {
+                                            val updated = withWritingPosture(posture)
+                                            writingPosture = updated.writingPosture
+                                            palmZone = updated.palmZone
+                                        }
+                                    } },
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = WritingPosture.entries.size),
+                                ) { Text(humanizePosture(posture)) }
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SingleChoiceSegmentedButtonRow {
                             PalmZoneSide.entries.forEachIndexed { index, side ->
                                 SegmentedButton(
                                     selected = settings.palmZone.side == side,
@@ -330,6 +352,12 @@ private fun LabsCard(
 
 private fun humanizeMode(name: String): String =
     name.lowercase().replaceFirstChar { it.uppercase() }
+
+private fun humanizePosture(posture: WritingPosture): String = when (posture) {
+    WritingPosture.RIGHT_HANDED -> "Right"
+    WritingPosture.LEFT_HANDED -> "Left"
+    WritingPosture.TWO_HANDED -> "Two"
+}
 
 /** Color key for the live contact classifications. */
 @Composable
