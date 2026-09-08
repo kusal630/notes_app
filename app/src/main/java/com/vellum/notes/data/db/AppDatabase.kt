@@ -6,8 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [NotebookEntity::class, PageEntity::class, CategoryEntity::class, BookHighlightEntity::class, TagEntity::class, NotebookTagCrossRef::class, PageSearchEntity::class],
-    version = 6,
+    entities = [NotebookEntity::class, PageEntity::class, CategoryEntity::class, BookHighlightEntity::class, TagEntity::class, NotebookTagCrossRef::class, PageSearchEntity::class, PageVersionEntity::class],
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -18,6 +18,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun highlightDao(): HighlightDao
     abstract fun tagDao(): TagDao
     abstract fun pageSearchDao(): PageSearchDao
+    abstract fun pageVersionDao(): PageVersionDao
 
     companion object {
         @Volatile
@@ -30,7 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "vellum.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .build()
                     .also { instance = it }
             }
@@ -118,6 +119,22 @@ abstract class AppDatabase : RoomDatabase() {
                 "INSERT INTO page_search (pageId, notebookId, title, body) " +
                     "SELECT `id`, `notebookId`, `title`, '' FROM pages"
             )
+        }
+
+        /**
+         * v6 → v7: page version history. A new table with a cascading foreign
+         * key; no existing data is touched.
+         */
+        val MIGRATION_6_7 = androidx.room.migration.Migration(6, 7) { db ->
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS page_versions (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`pageId` INTEGER NOT NULL, `contentJson` TEXT NOT NULL DEFAULT '', " +
+                    "`createdAt` INTEGER NOT NULL DEFAULT 0, " +
+                    "FOREIGN KEY(`pageId`) REFERENCES `pages`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE)"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_page_versions_pageId` ON `page_versions` (`pageId`)")
         }
     }
 }

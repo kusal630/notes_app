@@ -180,6 +180,24 @@ class EditorViewModel(
     /** Nebo-style convert; returns the new text id (0 when nothing convertible). */
     fun convertSelectionToText(): Long = _editor.value?.convertSelectionToText() ?: 0L
 
+    /**
+     * Reloads the page content from storage, replacing the in-memory state.
+     * Used after a version-history restore so the canvas shows the restored
+     * content immediately; the undo stack resets (the restore itself stays
+     * reversible through history). The pending autosave is cancelled first so
+     * stale in-memory content cannot overwrite the restore.
+     */
+    fun refreshContent() {
+        viewModelScope.launch {
+            saveJob?.cancel()
+            saveMutex.withLock {
+                val content = repository.loadPageContent(pageId) ?: PageContent()
+                _editor.value = NoteEditorState(content)
+                SpeechController.setSegments(content.transcript)
+            }
+        }
+    }
+
     override fun onCleared() {
         saveJob?.cancel()
         // Flush the latest content synchronously so work done just before navigating away
@@ -189,6 +207,8 @@ class EditorViewModel(
         if (pending != null) {
             runBlocking(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { repository.savePageContent(pageId, pending) }
+                // Closing snapshot for version history (deduped: no-op when unchanged).
+                runCatching { repository.saveVersion(pageId) }
             }
         }
     }

@@ -9,10 +9,12 @@ import com.vellum.notes.data.db.NotebookTagCrossRef
 import com.vellum.notes.data.db.PageDao
 import com.vellum.notes.data.db.PageEntity
 import com.vellum.notes.data.db.PageSearchEntity
+import com.vellum.notes.data.db.PageVersionEntity
 import com.vellum.notes.data.db.TagEntity
 import com.vellum.notes.model.BookHighlight
 import com.vellum.notes.model.Category
 import com.vellum.notes.model.Notebook
+import com.vellum.notes.model.PageVersion
 import com.vellum.notes.model.Tag
 import com.vellum.notes.model.NoteType
 import com.vellum.notes.model.PageBackground
@@ -37,6 +39,7 @@ class RoomNotesRepository(private val db: AppDatabase) : NotesRepository {
     private val highlightDao = db.highlightDao()
     private val tagDao = db.tagDao()
     private val pageSearchDao = db.pageSearchDao()
+    private val pageVersionDao = db.pageVersionDao()
 
     /** Flushes the WAL into the db file so a file-level backup is consistent. */
     suspend fun checkpoint() {
@@ -294,6 +297,37 @@ class RoomNotesRepository(private val db: AppDatabase) : NotesRepository {
         if (match.isBlank()) return emptyList()
         return pageSearchDao.searchNotebookIds(match)
     }
+
+    override suspend fun saveVersion(pageId: Long) {
+        val page = pageDao.get(pageId) ?: return
+        val latest = pageVersionDao.latestForPage(pageId)
+        // Identical consecutive snapshots are noise: skip them so liberal
+        // callers (page close, manual save) cannot spam history.
+        if (latest != null && latest.contentJson == page.contentJson) return
+        pageVersionDao.insert(
+            PageVersionEntity(pageId = pageId, contentJson = page.contentJson)
+        )
+        pageVersionDao.prune(pageId, NotesRepository.MAX_VERSIONS_PER_PAGE)
+    }
+
+    override fun versionsForPage(pageId: Long): Flow<List<PageVersion>> =
+        pageVersionDao.observeForPage(pageId).map { list ->
+            list.map { PageVersion(id = it.id, pageId = it.pageId, createdAt = it.createdAt) }
+        }
+
+    override suspend fun restoreVersion(versionId: Long) {
+        val version = pageVersionDao.get(versionId) ?: return
+        val content = runCatching {
+            json.decodeFromString<PageContent>(version.contentJson)
+        }.getOrNull() ?: return
+        // Snapshot the present first so the restore itself stays reversible.
+        saveVersion(version.pageId)
+        // A restore is a normal content write (re-indexed for search).
+        savePageContent(version.pageId, content)
+    }
+
+    override suspend fun deleteVersion(versionId: Long) =
+        pageVersionDao.delete(versionId)
 
     /** Rebuilds the full-text row for one page (title + current content). */
     private suspend fun indexPage(pageId: Long) {

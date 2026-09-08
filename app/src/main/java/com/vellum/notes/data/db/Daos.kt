@@ -171,7 +171,6 @@ interface TagDao {
 
 @Dao
 interface PageSearchDao {
-
     @Insert
     suspend fun insert(row: PageSearchEntity)
 
@@ -243,4 +242,33 @@ interface PageDao {
 
     @Query("UPDATE pages SET pdfPageIndex = :pdfPageIndex, pdfBackgroundPath = :pdfBackgroundPath, updatedAt = :now WHERE id = :id")
     suspend fun savePdfBackground(id: Long, pdfPageIndex: Int, pdfBackgroundPath: String, now: Long = System.currentTimeMillis())
+}
+
+@Dao
+interface PageVersionDao {
+
+    @Query("SELECT * FROM page_versions WHERE pageId = :pageId ORDER BY createdAt DESC")
+    fun observeForPage(pageId: Long): Flow<List<PageVersionEntity>>
+
+    @Query("SELECT * FROM page_versions WHERE pageId = :pageId ORDER BY createdAt DESC LIMIT 1")
+    suspend fun latestForPage(pageId: Long): PageVersionEntity?
+
+    @Query("SELECT COUNT(*) FROM page_versions WHERE pageId = :pageId")
+    suspend fun countForPage(pageId: Long): Int
+
+    @Insert
+    suspend fun insert(version: PageVersionEntity): Long
+
+    @Query("SELECT * FROM page_versions WHERE id = :id")
+    suspend fun get(id: Long): PageVersionEntity?
+
+    @Query("DELETE FROM page_versions WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    /**
+     * Keeps only the newest [keep] versions of a page (by id order, which is
+     * monotonic with creation).
+     */
+    @Query("DELETE FROM page_versions WHERE pageId = :pageId AND id NOT IN (SELECT id FROM page_versions WHERE pageId = :pageId ORDER BY id DESC LIMIT :keep)")
+    suspend fun prune(pageId: Long, keep: Int)
 }

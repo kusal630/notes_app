@@ -6,6 +6,7 @@ import com.vellum.notes.model.Notebook
 import com.vellum.notes.model.NoteType
 import com.vellum.notes.model.PageContent
 import com.vellum.notes.model.PageSummary
+import com.vellum.notes.model.PageVersion
 import com.vellum.notes.model.Tag
 import kotlinx.coroutines.flow.Flow
 
@@ -95,4 +96,23 @@ interface NotesRepository {
      * (full-text search over titles, typed text, transcripts, summaries).
      */
     suspend fun searchPageTexts(query: String): List<Long>
+
+    /**
+     * Snapshots the page's current content. Skipped when nothing changed since
+     * the latest snapshot; pruned to the newest [MAX_VERSIONS_PER_PAGE].
+     * Safe to call liberally (page close, manual save).
+     */
+    suspend fun saveVersion(pageId: Long)
+
+    /** Version snapshots of a page, newest first. */
+    fun versionsForPage(pageId: Long): Flow<List<PageVersion>>
+
+    /** Restores a snapshot's content onto its page (a normal undoable edit). */
+    suspend fun restoreVersion(versionId: Long)
+
+    suspend fun deleteVersion(versionId: Long)
+
+    companion object {
+        const val MAX_VERSIONS_PER_PAGE = 20
+    }
 }

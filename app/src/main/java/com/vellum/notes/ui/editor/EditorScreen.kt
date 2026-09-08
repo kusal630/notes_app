@@ -121,6 +121,9 @@ import com.vellum.notes.export.PdfExporter
 import java.io.File
 import androidx.activity.result.PickVisualMediaRequest
 import android.graphics.BitmapFactory
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.vellum.notes.data.ImageStore
 import com.vellum.notes.data.MediaLoader
 import com.vellum.notes.model.PaperTemplates
@@ -246,6 +249,8 @@ fun EditorScreen(
     val selectedIds by editorState!!.selectedIds.collectAsState()
     val settings by settingsFlow.collectAsState(initial = PalmRejectionSettings())
 
+    // Page rail overlay + version history dialog state.
+    var historyPageId by remember { mutableStateOf<Long?>(null) }
     // The page rail is a hideable overlay so the canvas stays full-screen for writing.
     var showRail by remember { mutableStateOf(false) }
 
@@ -373,6 +378,19 @@ fun EditorScreen(
                 height = hMm,
                 fileRef = fileRef,
             ),
+        )
+    }
+
+    // ---- Page version history ----
+    historyPageId?.let { hid ->
+        VersionsDialog(
+            pageId = hid,
+            repository = repository,
+            onDismiss = { historyPageId = null },
+            onRestoredCurrentPage = {
+                // The restored page is open: reload it into the canvas now.
+                if (hid == pageId) vm.refreshContent()
+            },
         )
     }
 
@@ -786,6 +804,7 @@ fun EditorScreen(
                                 if (id == selectedPageId) selectedPageId = null
                             }
                         },
+                        onHistoryPage = { id -> historyPageId = id },
                     )
                     HorizontalDivider(
                         modifier = Modifier.width(1.dp).fillMaxHeight(),
@@ -994,6 +1013,65 @@ private fun SidebarTab(label: String, selected: Boolean, onClick: () -> Unit, mo
     }
 }
 
+@Composable
+private fun VersionsDialog(
+    pageId: Long,
+    repository: NotesRepository,
+    onDismiss: () -> Unit,
+    onRestoredCurrentPage: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val versions by repository.versionsForPage(pageId).collectAsState(initial = emptyList())
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Page history") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Snapshots are saved when pages close and on demand. " +
+                        "Restoring replaces the page (the replaced state is snapshotted first).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { scope.launch { repository.saveVersion(pageId) } }) {
+                    Text("Snapshot now")
+                }
+                Spacer(Modifier.height(8.dp))
+                if (versions.isEmpty()) {
+                    Text("No snapshots yet.")
+                }
+                versions.forEach { v ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    ) {
+                        Text(
+                            versionDateFormat.format(Date(v.createdAt)),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        TextButton(onClick = {
+                            scope.launch {
+                                repository.restoreVersion(v.id)
+                                onRestoredCurrentPage()
+                            }
+                        }) { Text("Restore") }
+                        TextButton(onClick = {
+                            scope.launch { repository.deleteVersion(v.id) }
+                        }) { Text("Delete") }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        },
+    )
+}
+
+private val versionDateFormat = SimpleDateFormat("MM/dd/yy, h:mm a", Locale.US)
+
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PageRail(
@@ -1004,6 +1082,7 @@ private fun PageRail(
     onNewPage: () -> Unit,
     onDuplicatePage: (Long) -> Unit = {},
     onDeletePage: (Long) -> Unit = {},
+    onHistoryPage: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -1057,6 +1136,10 @@ private fun PageRail(
                                 DropdownMenuItem(
                                     text = { Text("Duplicate") },
                                     onClick = { menuOpen = false; onDuplicatePage(page.id) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("History") },
+                                    onClick = { menuOpen = false; onHistoryPage(page.id) },
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Delete") },

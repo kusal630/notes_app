@@ -234,8 +234,9 @@ class TagsFtsTest {
 
         // Open the same file with the real Room database: migration 5→6 runs
         // and Room validates the resulting schema (catches FTS DDL drift).
+        // The 6→7 step rides along (current version is 7).
         val room = Room.databaseBuilder(ctx, AppDatabase::class.java, file.absolutePath)
-            .addMigrations(AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .allowMainThreadQueries()
             .build()
         // Backfilled title is searchable immediately.

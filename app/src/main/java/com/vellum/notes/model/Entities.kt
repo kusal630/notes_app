@@ -41,6 +41,13 @@ data class Tag(
     val notebookCount: Int = 0,
 )
 
+/** One saved snapshot of a page's content. */
+data class PageVersion(
+    val id: Long = 0L,
+    val pageId: Long = 0L,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
 /**
  * One freehand highlight stroke in read mode. Points are page-relative (0..1 of
  * the page image) so highlights survive crops and re-rasterization.

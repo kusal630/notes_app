@@ -161,6 +161,32 @@ data class TagRow(
 )
 
 /**
+ * One version snapshot of a page's content. Created on page close and on
+ * demand (never on every autosave); identical consecutive snapshots are
+ * skipped and only the newest [com.vellum.notes.data.RoomNotesRepository.MAX_VERSIONS_PER_PAGE]
+ * are kept. Cascades with the page.
+ */
+@Entity(
+    tableName = "page_versions",
+    foreignKeys = [
+        ForeignKey(
+            entity = PageEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["pageId"],
+            onDelete = ForeignKey.CASCADE,
+        )
+    ],
+    indices = [Index("pageId")],
+)
+data class PageVersionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val pageId: Long,
+    /** Serialized [com.vellum.notes.model.PageContent] at snapshot time. */
+    val contentJson: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+/**
  * Full-text index over page text (titles + typed text + transcripts + summaries).
  * Maintained manually by the repository on every content/title/page change
  * (see [com.vellum.notes.data.SearchIndex]); FTS tables cannot use foreign

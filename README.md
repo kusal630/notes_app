@@ -17,6 +17,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | 🔷 Shapes | Line, arrow, rect, circle, ellipse, triangle, star, hexagon — select, move, resize |
 | 📄 Pages | Multi-page notebooks, page rail, long-press **duplicate / delete**, templates per notebook + per page |
 | 📚 Paper | 11 templates (ruled, grid, dotted, graph, Cornell, music, math…), 10 premium covers incl. Aurum Gold |
+| 🕘 History | Page snapshots on close + on demand (deduped, newest 20 kept), restore with pre-restore safety snapshot, per-page history from the page rail |
 | 🔍 Organize | Noteshelf home (sidebar + categories, Starred/Unfiled/Trash/Archived), tags with filter chips, full-text search over titles/typed text/transcripts/summaries, Quick Note, Recent / A–Z sort |
 | 💾 Backup | One-tap local ZIP export (database + images + PDF pages) to your own folder — no cloud |
 | 📥 PDF | Import & annotate any PDF offline; export preserves italic/underline/alignment; reader themes + auto-trim coming |
