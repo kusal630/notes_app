@@ -19,7 +19,7 @@ Write naturally with a stylus or your finger. Raw touch input is analyzed in rea
 | 📚 Paper | 11 templates (ruled, grid, dotted, graph, Cornell, music, math…), 10 premium covers incl. Aurum Gold |
 | 🔍 Organize | Home **search**, Recent / A–Z sort, favorites-first + favorites filter |
 | 💾 Backup | One-tap local ZIP export (database + images + PDF pages) to your own folder — no cloud |
-| 📥 PDF | Import & annotate any PDF offline; export notes to PDF and share |
+| 📥 PDF | Import & annotate any PDF offline; export preserves italic/underline/alignment; reader themes + auto-trim coming |
 | 🎙️ Classroom | Optional on-device recording with live Vosk transcription + summary, saved with the note |
 | 🎨 Canvas | Infinite canvas, pinch-to-zoom + pan, undo/redo, light & dark themes |
 | 🧪 Diagnostics | Input Labs screen for calibrating palm rejection to your hardware |

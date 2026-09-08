@@ -127,6 +127,8 @@ object PdfExporter {
                         textSize = t.fontSizeMm
                         typeface = if (t.bold) android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.BOLD)
                                    else android.graphics.Typeface.create(t.fontFamily, android.graphics.Typeface.NORMAL)
+                        if (t.italic) textSkewX = -0.25f
+                        if (t.underline) isUnderlineText = true
                         isSubpixelText = true
                     }
                     canvas.save()
@@ -145,7 +147,13 @@ object PdfExporter {
                     }
                     var y = t.y + t.fontSizeMm
                     for (line in lines) {
-                        canvas.drawText(line, t.x, y, textPaint)
+                        val lineW = textPaint.measureText(line)
+                        val dx = when (t.alignment) {
+                            com.vellum.notes.model.TextAlign.CENTER -> (maxW - lineW).coerceAtLeast(0f) / 2f
+                            com.vellum.notes.model.TextAlign.RIGHT -> (maxW - lineW).coerceAtLeast(0f)
+                            com.vellum.notes.model.TextAlign.LEFT -> 0f
+                        }
+                        canvas.drawText(line, t.x + dx, y, textPaint)
                         y += t.fontSizeMm * 1.35f
                     }
                     canvas.restore()
