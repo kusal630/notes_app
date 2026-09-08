@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.Image
@@ -118,6 +119,7 @@ import java.io.File
 import androidx.activity.result.PickVisualMediaRequest
 import android.graphics.BitmapFactory
 import com.vellum.notes.data.ImageStore
+import com.vellum.notes.data.MediaLoader
 import com.vellum.notes.model.PaperTemplates
 import com.vellum.notes.pdf.PdfImporter
 import com.vellum.notes.input.InputCapabilities
@@ -314,6 +316,7 @@ fun EditorScreen(
     // ---- Wave-1 UI state: templates, text boxes, images ----
     var showTemplateDialog by remember { mutableStateOf(false) }
     var showTextDialog by remember { mutableStateOf(false) }
+    var editingTextId by remember { mutableStateOf<Long?>(null) }
 
     val currentSummary = pageList.firstOrNull { it.id == pageId }
     val pageBackground = remember(pageId, currentSummary?.templateId, currentSummary?.background) {
@@ -327,7 +330,7 @@ fun EditorScreen(
         val path = currentSummary?.pdfBackgroundPath.orEmpty()
         if (path.isBlank()) null
         else runCatching {
-            BitmapFactory.decodeFile(File(uiContext.filesDir, PdfImporter.DIR).resolve(path).absolutePath)
+            PdfImporter.resolveFile(uiContext, path)?.let { MediaLoader.decodeSampled(it, rgb565 = true) }
         }.getOrNull()
     }
 
@@ -335,7 +338,7 @@ fun EditorScreen(
     val imageBitmapCache = remember(content.imageObjects.map { it.fileRef }.joinToString("|")) {
         content.imageObjects.associate { im ->
             im.fileRef to runCatching {
-                BitmapFactory.decodeFile(File(uiContext.filesDir, im.fileRef).absolutePath)
+                ImageStore.resolveFile(uiContext, im.fileRef)?.let { MediaLoader.decodeSampled(it) }
             }.getOrNull()
         }.filterValues { it != null } as Map<String, android.graphics.Bitmap>
     }
@@ -350,9 +353,11 @@ fun EditorScreen(
             android.widget.Toast.makeText(uiContext, "Could not import image", android.widget.Toast.LENGTH_SHORT).show()
             return@rememberLauncherForActivityResult
         }
-        val bmp = BitmapFactory.decodeFile(File(uiContext.filesDir, fileRef).absolutePath)
+        val file = ImageStore.resolveFile(uiContext, fileRef)
         // Place at a sensible default: 60mm wide, centered in the current viewport.
-        val aspect = if (bmp != null && bmp.height > 0) bmp.height.toFloat() / bmp.width else 0.75f
+        // Probe dimensions without a full decode (OOM-safe).
+        val size = file?.let { MediaLoader.probeSize(it) }
+        val aspect = if (size != null && size.first > 0) size.second.toFloat() / size.first else 0.75f
         val wMm = 60f
         val hMm = (wMm * aspect).coerceAtMost(160f)
         // Default placement: upper-center of the A4-width world (210mm wide).
@@ -440,6 +445,36 @@ fun EditorScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showTextDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // ---- Edit selected text box ----
+    val editingText = editingTextId?.let { id -> content.textObjects.firstOrNull { it.id == id } }
+    if (editingText != null) {
+        var editValue by remember(editingText.id) { mutableStateOf(editingText.text) }
+        AlertDialog(
+            onDismissRequest = { editingTextId = null },
+            title = { Text("Edit text") },
+            text = {
+                OutlinedTextField(
+                    value = editValue,
+                    onValueChange = { editValue = it },
+                    label = { Text("Text") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (editValue.isNotBlank()) {
+                        vm.updateText(editingText.copy(text = editValue))
+                    }
+                    editingTextId = null
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingTextId = null }) { Text("Cancel") }
             },
         )
     }
@@ -541,6 +576,11 @@ fun EditorScreen(
                     imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
                 onPickTemplate = { showTemplateDialog = true },
+                canEditText = selectedIds.size == 1 &&
+                    content.textObjects.any { it.id in selectedIds },
+                onEditText = {
+                    selectedIds.firstOrNull()?.let { editingTextId = it }
+                },
             )
         }
     ) { padding ->
@@ -1176,6 +1216,8 @@ private fun EditorToolbar(
     onInsertText: () -> Unit = {},
     onInsertImage: () -> Unit = {},
     onPickTemplate: () -> Unit = {},
+    canEditText: Boolean = false,
+    onEditText: () -> Unit = {},
 ) {
     Surface(tonalElevation = 4.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -1246,10 +1288,6 @@ private fun EditorToolbar(
                 )
 
                 Spacer(Modifier.width(8.dp))
-
-                // Tools that are not implemented yet — explicitly disabled, never faked.
-                DisabledToolButton(Icons.Filled.TextFields, "Text (in progress)")
-                DisabledToolButton(Icons.Filled.Image, "Image (in progress)")
             }
 
             Spacer(Modifier.height(8.dp))
@@ -1403,6 +1441,13 @@ private fun EditorToolbar(
                             style = MaterialTheme.typography.labelMedium,
                         )
                         if (selectedCount > 0) {
+                            if (canEditText) {
+                                TextButton(onClick = onEditText) {
+                                    Icon(Icons.Filled.Edit, contentDescription = null)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Edit text")
+                                }
+                            }
                             TextButton(onClick = onDuplicateSelection) {
                                 Icon(Icons.Filled.ContentCopy, contentDescription = null)
                                 Spacer(Modifier.width(4.dp))

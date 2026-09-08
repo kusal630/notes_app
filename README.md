@@ -14,7 +14,8 @@ leaves ink — no proprietary or cloud palm-rejection service required.
 - Pen, highlighter, eraser, and selection tools
 - Shapes: draw them, then select, move, or resize a shape with the content inside it
 - Paper templates: blank, ruled, grid, dotted, and graph pages (per-notebook default + per-page override)
-- Notebook covers: eight premium gradient/pattern covers rendered on home-screen cards
+- Notebook covers: ten premium gradient/pattern covers (incl. Aurum Gold + Noir Gold) rendered on home-screen cards
+- Home search, sort (Recent/A–Z), favorites-first + favorites filter — find any notebook in seconds
 - PDF import & annotation: import any PDF offline; every page becomes a writable page with ink on top
 - Image insertion: place, move, and scale pictures in your notes
 - Text boxes: typed text blocks layered between images and ink

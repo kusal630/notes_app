@@ -95,7 +95,7 @@ class Wave1ModelsTest {
 
     @Test
     fun coverRegistry_hasEightCovers_withUniqueIds() {
-        assertEquals(8, NotebookCovers.ALL.size)
+        assertEquals(10, NotebookCovers.ALL.size)
         assertEquals(NotebookCovers.ALL.size, NotebookCovers.ALL.map { it.id }.toSet().size)
     }
 

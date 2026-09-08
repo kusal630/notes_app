@@ -242,10 +242,10 @@ fun SettingsContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Auto-convert handwriting to text", style = MaterialTheme.typography.bodyLarge)
+                Text("Auto-convert handwriting to text (Coming soon)", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "When on, finished strokes are automatically converted to typed text. " +
-                        "Recognition is not implemented yet, so this switch currently has no effect.",
+                    "Finished strokes will become typed text in a future update. " +
+                        "This switch is reserved and currently has no effect.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

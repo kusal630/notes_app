@@ -34,13 +34,29 @@ object ImageStore {
         return "img-${UUID.randomUUID()}.$ext"
     }
 
+    /** Maximum image import size (disk-exhaustion guard). */
+    const val MAX_BYTES = 25L * 1024L * 1024L
+
     /** Copies [uri] into app-private storage; returns the stored fileRef or null. */
     fun importUri(context: Context, uri: Uri, mimeType: String? = null): String? {
         return try {
             val dir = mediaDir(context)
             val file = File(dir, newFileName(mimeType ?: context.contentResolver.getType(uri)))
+            var total = 0L
             context.contentResolver.openInputStream(uri)?.use { input ->
-                file.outputStream().use { input.copyTo(it) }
+                file.outputStream().use { out ->
+                    val buf = ByteArray(32 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        total += n
+                        if (total > MAX_BYTES) {
+                            runCatching { file.delete() }
+                            return null
+                        }
+                        out.write(buf, 0, n)
+                    }
+                }
             } ?: return null
             fileRefFor(file.name)
         } catch (t: Throwable) {

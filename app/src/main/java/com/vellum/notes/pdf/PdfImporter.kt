@@ -37,8 +37,19 @@ object PdfPagePlan {
 
 object PdfImporter {
     const val DIR = "pdf-pages"
+    /** Maximum pages rasterized per import (disk/OOM guard). */
+    const val MAX_PAGES = 50
 
     fun pdfDir(context: Context): File = File(context.filesDir, DIR).apply { mkdirs() }
+
+    /** Resolves a stored pdf background name to a [File], basename-stripped so DB values like `../../x` can never escape [pdfDir]. */
+    fun resolveFile(context: Context, storedName: String): File? {
+        if (storedName.isBlank()) return null
+        val name = storedName.substringAfterLast("/").substringAfterLast(File.separator)
+        if (name.isBlank() || name.contains("..")) return null
+        val file = File(pdfDir(context), name)
+        return if (file.exists()) file else null
+    }
 
     fun pageCountOf(context: Context, uri: Uri): Int {
         return try {
@@ -59,7 +70,8 @@ object PdfImporter {
         try {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { fd ->
                 PdfRenderer(fd).use { renderer ->
-                    val specs = PdfPagePlan.plan(renderer.pageCount, notebookId, UUID.randomUUID().toString().take(8))
+                    val count = renderer.pageCount.coerceAtMost(MAX_PAGES)
+                    val specs = PdfPagePlan.plan(count, notebookId, UUID.randomUUID().toString().take(8))
                     for (spec in specs) {
                         renderer.openPage(spec.pdfPageIndex).use { page ->
                             val w = (page.width * dpiScale).toInt().coerceIn(1, 4096)

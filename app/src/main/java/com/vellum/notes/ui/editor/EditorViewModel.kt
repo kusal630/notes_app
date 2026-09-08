@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Editor ViewModel: loads a page's content into a [NoteEditorState], exposes it to the
@@ -39,6 +40,8 @@ class EditorViewModel(
     val editor: StateFlow<NoteEditorState?> = _editor.asStateFlow()
 
     private var saveJob: Job? = null
+    /** Serializes Room writes so rapid edits can never interleave or starve each other. */
+    private val saveMutex = kotlinx.coroutines.sync.Mutex()
 
     init {
         viewModelScope.launch {
@@ -55,7 +58,9 @@ class EditorViewModel(
                     .collectLatest { c ->
                         saveJob?.cancel()
                         saveJob = viewModelScope.launch {
-                            repository.savePageContent(pageId, c)
+                            saveMutex.withLock {
+                                runCatching { repository.savePageContent(pageId, c) }
+                            }
                         }
                     }
             }
@@ -132,9 +137,24 @@ class EditorViewModel(
     fun setPenStyle(style: PenStyle) = _editor.value?.setPenStyle(style)
     fun setEraserSize(sizeMm: Float) = _editor.value?.setEraserSize(sizeMm)
     fun setShapeKind(kind: ShapeKind) = _editor.value?.setShapeKind(kind)
-    fun addImage(image: com.vellum.notes.model.ImageObject) = _editor.value?.addImage(image)
+    fun addImage(image: com.vellum.notes.model.ImageObject) {
+        val editor = _editor.value ?: return
+        editor.addImage(image)
+        // Select the new image so move/resize handles appear immediately.
+        val id = editor.content.value.imageObjects.maxByOrNull { it.id }?.id
+        if (id != null) editor.selectAt(
+            editor.content.value.imageObjects.first { it.id == id }.let { it.x + it.width / 2f },
+            editor.content.value.imageObjects.first { it.id == id }.let { it.y + it.height / 2f },
+        )
+    }
 
-    fun addText(text: com.vellum.notes.model.TextObject) = _editor.value?.addText(text)
+    fun addText(text: com.vellum.notes.model.TextObject) {
+        val editor = _editor.value ?: return
+        editor.addText(text)
+        // Select the new text so move/resize + Edit action are immediately available.
+        val obj = editor.content.value.textObjects.maxByOrNull { it.id }
+        if (obj != null) editor.selectAt(obj.x + obj.width / 2f, obj.y + obj.height / 2f)
+    }
     fun updateText(updated: com.vellum.notes.model.TextObject) = _editor.value?.updateText(updated)
 
     /** Sets this page's paper template and persists it. */
@@ -155,10 +175,13 @@ class EditorViewModel(
     override fun onCleared() {
         saveJob?.cancel()
         // Flush the latest content synchronously so work done just before navigating away
-        // (back, page switch, process recreation) is never lost.
+        // (back, page switch, process recreation) is never lost. IO dispatcher: never blocks
+        // the main thread's Looper, avoiding the ANR the old main-thread flush risked.
         val pending = _editor.value?.content?.value
         if (pending != null) {
-            runBlocking { repository.savePageContent(pageId, pending) }
+            runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { repository.savePageContent(pageId, pending) }
+            }
         }
     }
 }

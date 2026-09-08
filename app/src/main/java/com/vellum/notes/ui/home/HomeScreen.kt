@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
@@ -131,6 +133,10 @@ fun HomeScreen(
 
     // Which note type to show: null = all, otherwise only that type.
     var filter by remember { mutableStateOf<NoteType?>(null) }
+    // Premium home: search + sort. Favorites always float to the top.
+    var query by remember { mutableStateOf("") }
+    var sortByName by remember { mutableStateOf(false) }
+    var favoritesOnly by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -177,6 +183,50 @@ fun HomeScreen(
             val visible = notebooks
                 .filterNot { it.isArchived }
                 .filter { filter == null || it.type == filter }
+                .filter { !favoritesOnly || it.isFavorite }
+                .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }
+                .sortedWith(
+                    compareByDescending<Notebook> { it.isFavorite }.then(
+                        if (sortByName) compareBy { it.title.lowercase() }
+                        else compareByDescending { it.updatedAt }
+                    )
+                )
+
+            // Search + sort row (premium productivity: find any notebook in seconds).
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text("Search notes") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                        }
+                    }
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(onClick = { sortByName = !sortByName }) {
+                    Text(if (sortByName) "Sort: A–Z" else "Sort: Recent")
+                }
+                TextButton(onClick = { favoritesOnly = !favoritesOnly }) {
+                    Icon(
+                        Icons.Filled.Star,
+                        contentDescription = null,
+                        tint = if (favoritesOnly) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Favorites")
+                }
+            }
 
             if (visible.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

@@ -31,8 +31,10 @@ object NotebookCovers {
     val OCEAN = Cover("OCEAN", "Ocean", 0xFF1E88E5, 0xFF0D47A1, Pattern.GRID)
     val GRAPE = Cover("GRAPE", "Grape", 0xFF8E24AA, 0xFF4A148C, Pattern.DOTS)
     val STONE = Cover("STONE", "Stone", 0xFF757575, 0xFF757575, Pattern.SOLID)
+    val AURUM = Cover("AURUM", "Aurum Gold", 0xFFE8B84B, 0xFF8A5E10, Pattern.GRADIENT)
+    val NOIR = Cover("NOIR", "Noir Gold", 0xFF2A2418, 0xFF0E0C07, Pattern.LINES)
 
-    val ALL: List<Cover> = listOf(TEAL, NAVY, EMBER, AMBER, FOREST, OCEAN, GRAPE, STONE)
+    val ALL: List<Cover> = listOf(TEAL, NAVY, EMBER, AMBER, FOREST, OCEAN, GRAPE, STONE, AURUM, NOIR)
 
     fun byId(id: String?): Cover =
         ALL.firstOrNull { it.id == id } ?: TEAL

@@ -5,18 +5,21 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Vellum mark: a bold single tapered stroke forming a minimal "V",
-         centered in the adaptive-icon safe zone (66dp circle at 54,54).
-         Arms are wide at the top and taper to the apex. -->
+    <!-- Premium Vellum mark: gold V-nib on deep ink. Gold = premium, ink = focus. -->
     <path
-        android:fillColor="#FFFFFF"
+        android:fillColor="#E8B84B"
         android:pathData="M35,32 L46,32 L54,58 L62,32 L73,32 L54,76 Z" />
 
-    <!-- Nib slit: a fine background-colored cut along the right arm. -->
+    <!-- Nib slit: background-colored cut along the right arm. -->
     <path
         android:fillColor="#00000000"
         android:strokeColor="#171B24"
         android:strokeWidth="2.4"
         android:strokeLineCap="round"
         android:pathData="M67,37 L57,66" />
+
+    <!-- Nib point: small gold-deep dot at the apex. -->
+    <path
+        android:fillColor="#B98A1E"
+        android:pathData="M54,70 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
 </vector>
