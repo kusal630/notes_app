@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -40,11 +39,13 @@ import com.vellum.notes.data.SyncCrypto
 import com.vellum.notes.data.SyncFolder
 import com.vellum.notes.data.SyncRepository
 import com.vellum.notes.data.SyncSnapshot
+import com.vellum.notes.data.SyncStatus
 import com.vellum.notes.data.db.AppDatabase
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -54,6 +55,11 @@ private val syncDateFormat = SimpleDateFormat("MM/dd/yy, h:mm a", Locale.US)
  * Device-sync settings (Syncthing folder): pick the mirrored folder, export
  * snapshots, and import other devices' snapshots with an explicit confirm +
  * restart. The passphrase is asked at use time and never stored.
+ *
+ * Conflict resolution: when both this device and another device changed since
+ * the last successful sync, a [SyncConflictDialog] offers Keep Local (write a
+ * fresh snapshot so remotes converge) vs Keep Remote (import the remote
+ * snapshot with the usual safety copy + restart).
  */
 @Composable
 fun SyncSection(
@@ -64,6 +70,10 @@ fun SyncSection(
     val scope = rememberCoroutineScope()
     val dirUri by syncRepository.syncDirUri.collectAsState(initial = null)
     val notebooks by notesRepository.notebooks.collectAsState(initial = emptyList())
+    val syncStatus by syncRepository.syncStatus.collectAsState(initial = SyncStatus.IDLE)
+    val lastSyncAt by syncRepository.lastSyncAtMs.collectAsState(initial = null)
+    val lastError by syncRepository.lastError.collectAsState(initial = null)
+    val pendingConflict by syncRepository.pendingConflict.collectAsState(initial = null)
 
     var ownId by remember { mutableStateOf("") }
     var snapshots by remember { mutableStateOf<List<SyncSnapshot.SnapshotMeta>>(emptyList()) }
@@ -77,6 +87,8 @@ fun SyncSection(
     var importPassOpen by remember { mutableStateOf(false) }
     var importDone by remember { mutableStateOf(false) }
     var importError by remember { mutableStateOf<String?>(null) }
+    // Local override to open the dialog even before the persisted conflict lands.
+    var conflictDialog by remember { mutableStateOf<SyncSnapshot.SnapshotMeta?>(null) }
 
     fun refreshSnapshots() {
         scope.launch {
@@ -88,10 +100,15 @@ fun SyncSection(
                 snapshotUris = emptyMap()
                 return@launch
             }
+            syncRepository.markSyncStarted()
             val (metas, uris) = withContext(Dispatchers.IO) {
                 val treeUri = runCatching { Uri.parse(dir) }.getOrNull()
                     ?: return@withContext emptyList<SyncSnapshot.SnapshotMeta>() to emptyMap()
-                val files = SyncFolder.listFiles(context.contentResolver, treeUri)
+                val files = try {
+                    SyncFolder.listFiles(context.contentResolver, treeUri)
+                } catch (t: SecurityException) {
+                    return@withContext emptyList<SyncSnapshot.SnapshotMeta>() to emptyMap()
+                }
                 val all = SyncFolder.collectSnapshots(files) { doc ->
                     SyncFolder.readBytes(context.contentResolver, doc.uri)
                 }
@@ -103,6 +120,28 @@ fun SyncSection(
             }
             snapshots = metas
             snapshotUris = uris
+            // Conflict check: both sides changed since the last successful sync.
+            // Local modification time is approximated: any local notebooks count
+            // as "modified" when we have a prior sync to compare against.
+            val lastSync = syncRepository.lastSyncAtMs.first()
+            val localModifiedAt = if (notebooks.isNotEmpty() && lastSync != null) {
+                System.currentTimeMillis()
+            } else {
+                null
+            }
+            val conflict = SyncSnapshot.detectConflict(lastSync, localModifiedAt, metas)
+            if (conflict != null) {
+                syncRepository.setConflict(conflict)
+                conflictDialog = conflict
+            } else if (metas.isNotEmpty()) {
+                // Reachable folder, no conflict: leave FAILED/CONFLICT sticky so
+                // the user sees it until the next successful export; otherwise idle.
+                val current = syncRepository.syncStatus.first()
+                if (current == SyncStatus.SYNCING) syncRepository.setStatus(SyncStatus.IDLE)
+            } else {
+                val current = syncRepository.syncStatus.first()
+                if (current == SyncStatus.SYNCING) syncRepository.setStatus(SyncStatus.IDLE)
+            }
         }
     }
 
@@ -119,10 +158,13 @@ fun SyncSection(
             )
         } catch (t: Throwable) {
             status = "Folder permission was not granted."
+            scope.launch { syncRepository.markSyncFailed("Folder permission was not granted.") }
             return@rememberLauncherForActivityResult
         }
         scope.launch {
             syncRepository.setSyncDir(uri.toString())
+            // Immediate verification with WorkManager exponential-backoff retries.
+            runCatching { syncRepository.requestImmediateSync(context) }
             status = "Sync folder set — mirror it with Syncthing on your devices."
         }
     }
@@ -134,6 +176,7 @@ fun SyncSection(
         } else {
             busy = true
             scope.launch {
+                syncRepository.markSyncStarted()
                 try {
                     val ok = withContext(Dispatchers.IO) {
                         (notesRepository as? RoomNotesRepository)?.checkpoint()
@@ -165,8 +208,16 @@ fun SyncSection(
                                 SyncSnapshot.manifestToJson(manifest).toByteArray(),
                             )
                     }
-                    status = if (ok) "Snapshot written to the sync folder."
-                    else "Snapshot failed."
+                    if (ok) {
+                        syncRepository.markSyncSucceeded()
+                        // Exporting local wins: any conflict is resolved in our favor.
+                        syncRepository.clearConflict()
+                        conflictDialog = null
+                        status = "Snapshot written to the sync folder."
+                    } else {
+                        syncRepository.markSyncFailed("Snapshot write failed.")
+                        status = "Snapshot failed."
+                    }
                 } finally {
                     busy = false
                 }
@@ -183,6 +234,7 @@ fun SyncSection(
         } else {
             busy = true
             scope.launch {
+                syncRepository.markSyncStarted()
                 try {
                     val result = withContext(Dispatchers.IO) {
                         val bytes = SyncFolder.readBytes(context.contentResolver, docUri)
@@ -195,6 +247,9 @@ fun SyncSection(
                     }
                     when (result) {
                         BackupManager.RestoreResult.Success -> {
+                            syncRepository.markSyncSucceeded()
+                            syncRepository.clearConflict()
+                            conflictDialog = null
                             importDone = true
                             importTarget = null
                             importPassOpen = false
@@ -205,8 +260,10 @@ fun SyncSection(
                         }
                         BackupManager.RestoreResult.InvalidBackup ->
                             importError = "Not a Vellum snapshot."
-                        is BackupManager.RestoreResult.Error ->
+                        is BackupManager.RestoreResult.Error -> {
                             importError = "Import failed: ${result.message ?: "unknown error"}"
+                            syncRepository.markSyncFailed(importError)
+                        }
                     }
                 } finally {
                     busy = false
@@ -214,6 +271,13 @@ fun SyncSection(
             }
         }
     }
+
+    // Resolve the persisted conflict against the live scan so Keep Remote has
+    // the full manifest + document URI when available.
+    val effectiveConflict: SyncSnapshot.SnapshotMeta? =
+        conflictDialog ?: pendingConflict?.let { persisted ->
+            snapshots.firstOrNull { it.fileName == persisted.fileName } ?: persisted
+        }
 
     Column(Modifier.fillMaxWidth()) {
         Text(
@@ -237,6 +301,15 @@ fun SyncSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        SyncStatusRow(
+            status = if (dirUri == null) SyncStatus.DISABLED else syncStatus,
+            lastSyncAt = lastSyncAt,
+            lastError = lastError,
+            onRetry = {
+                runCatching { syncRepository.requestImmediateSync(context) }
+                refreshSnapshots()
+            },
+        )
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { folderPicker.launch(null) }) {
@@ -247,10 +320,35 @@ fun SyncSection(
                     onClick = {
                         scope.launch {
                             syncRepository.clearSyncDir()
+                            syncRepository.cancelBackgroundSync(context)
                             snapshots = emptyList()
                         }
                     },
                 ) { Text("Disconnect") }
+            }
+        }
+
+        // Conflict banner: both sides changed — force an explicit choice.
+        if (effectiveConflict != null && dirUri != null) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Sync conflict: another device wrote " +
+                    "${effectiveConflict.fileName} after your last sync. " +
+                    "Choose which side wins.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { conflictDialog = effectiveConflict }) {
+                    Text("Resolve")
+                }
+                OutlinedButton(onClick = {
+                    scope.launch { syncRepository.clearConflict() }
+                    conflictDialog = null
+                }) {
+                    Text("Later")
+                }
             }
         }
 
@@ -458,4 +556,118 @@ fun SyncSection(
             },
         )
     }
+
+    // ---- Conflict resolution: explicit Keep Local vs Keep Remote. ----
+    effectiveConflict?.let { remote ->
+        if (conflictDialog != null) {
+            SyncConflictDialog(
+                remote = remote,
+                onKeepLocal = {
+                    // Keep Local: current notes win — write a fresh snapshot so
+                    // remotes converge, then clear the conflict.
+                    conflictDialog = null
+                    exportSnapshot(null)
+                },
+                onKeepRemote = {
+                    // Keep Remote: route through the normal import confirm flow
+                    // (safety copy + restart, passphrase when needed).
+                    conflictDialog = null
+                    importTarget = snapshots.firstOrNull { it.fileName == remote.fileName }
+                        ?: remote
+                    if (importTarget?.manifest?.encrypted != true &&
+                        snapshotUris[importTarget?.fileName] == null &&
+                        pendingConflict != null
+                    ) {
+                        // Persisted conflict without a live URI: rescan first.
+                        refreshSnapshots()
+                    }
+                },
+                onDismiss = { conflictDialog = null },
+            )
+        }
+    }
+}
+
+/** Status line under the folder row; Retry re-enqueues the backoff worker. */
+@Composable
+private fun SyncStatusRow(
+    status: SyncStatus,
+    lastSyncAt: Long?,
+    lastError: String?,
+    onRetry: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Spacer(Modifier.height(4.dp))
+        val label = when (status) {
+            SyncStatus.DISABLED -> "Sync: off"
+            SyncStatus.IDLE -> "Sync: ready"
+            SyncStatus.SYNCING -> "Sync: checking…"
+            SyncStatus.SUCCEEDED -> "Sync: succeeded"
+            SyncStatus.FAILED -> "Sync: failed"
+            SyncStatus.CONFLICT -> "Sync: conflict — resolve below"
+        }
+        Text(
+            label + (lastSyncAt?.let { " · last ${syncDateFormat.format(Date(it))}" } ?: ""),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (status == SyncStatus.FAILED || status == SyncStatus.CONFLICT) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        if (status == SyncStatus.FAILED) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    lastError ?: "Sync check failed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(onClick = onRetry) { Text("Retry") }
+            }
+        }
+    }
+}
+
+/**
+ * Explicit conflict choice. Keep Local preserves this device's notes (writes a
+ * fresh snapshot); Keep Remote imports the other device's snapshot (safety
+ * copy first, restart afterwards).
+ */
+@Composable
+fun SyncConflictDialog(
+    remote: SyncSnapshot.SnapshotMeta,
+    onKeepLocal: () -> Unit,
+    onKeepRemote: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sync conflict") },
+        text = {
+            Text(
+                "Both this device and device " +
+                    "${SyncSnapshot.shortDeviceId(remote.deviceId)} changed since " +
+                    "the last sync (${syncDateFormat.format(Date(remote.createdAt))}, " +
+                    "${remote.fileName}).\n\n" +
+                    "Keep Local preserves every note here and writes a fresh " +
+                    "snapshot so your other devices converge. Keep Remote " +
+                    "replaces every note here with the other device's snapshot " +
+                    "(a safety copy is kept first).",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onKeepRemote) { Text("Keep Remote") }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onDismiss) { Text("Later") }
+                TextButton(onClick = onKeepLocal) { Text("Keep Local") }
+            }
+        },
+    )
 }
