@@ -10,5 +10,8 @@ class VellumApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // Hardened background sync: periodic folder verification with
+        // exponential-backoff retries. Best effort — never crash startup.
+        runCatching { container.syncRepository.schedulePeriodicSync(this) }
     }
 }

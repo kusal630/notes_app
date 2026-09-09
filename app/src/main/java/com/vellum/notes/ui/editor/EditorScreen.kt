@@ -115,6 +115,7 @@ import androidx.core.content.FileProvider
 import com.vellum.notes.VellumApp
 import com.vellum.notes.data.NotesRepository
 import com.vellum.notes.data.SettingsRepository
+import com.vellum.notes.data.SyncStatus
 import com.vellum.notes.editor.NoteEditorState
 import com.vellum.notes.editor.Tool
 import com.vellum.notes.export.PdfExporter
@@ -556,11 +557,18 @@ fun EditorScreen(
                 showTranscriptSidebar = false
             }
 
+            // Sync status for the top-bar indicator, driven by SyncRepository
+            // state (persisted; survives restarts). Defaults to IDLE when sync
+            // was never configured.
+            val syncStatus by app.container.syncRepository.syncStatus
+                .collectAsState(initial = SyncStatus.IDLE)
+
             Column(Modifier.fillMaxSize()) {
                 // Floating pills up top (never under the palm at the bottom):
                 // navigation, tools and page actions hover over the canvas.
                 CanvasTopBar(
                     tool = tool,
+                    syncStatus = syncStatus,
                     canUndo = state.canUndo,
                     canRedo = state.canRedo,
                     onUndo = { vm.undo() },
@@ -1290,6 +1298,50 @@ private suspend fun scrollListToFraction(
     listState.scrollToItem((fraction * (total - visible)).toInt())
 }
 
+/**
+ * Sync status pill for the canvas top bar, driven by [SyncStatus] from
+ * SyncRepository. Compact by design: a colored dot + short label so sync
+ * health (including CONFLICT/FAILED) is visible without leaving the canvas.
+ */
+@Composable
+fun SyncStatusIndicator(
+    syncStatus: SyncStatus,
+    modifier: Modifier = Modifier,
+) {
+    val (label, color, description) = when (syncStatus) {
+        SyncStatus.DISABLED -> Triple("Sync off", Color.Gray, "Sync is off")
+        SyncStatus.IDLE -> Triple("Ready", Color.Gray, "Sync ready")
+        SyncStatus.SYNCING -> Triple("Syncing…", Color(0xFF1E88E5), "Sync in progress")
+        SyncStatus.SUCCEEDED -> Triple("Synced", Color(0xFF43A047), "Sync succeeded")
+        SyncStatus.FAILED -> Triple("Sync failed", Color(0xFFE53935), "Sync failed")
+        SyncStatus.CONFLICT -> Triple("Conflict", Color(0xFFFB8C00), "Sync conflict needs resolution")
+    }
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 2.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(color),
+            )
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
 @Composable
 private fun CanvasTopBar(
     tool: Tool,
@@ -1331,6 +1383,7 @@ private fun CanvasTopBar(
     transcriptAvailable: Boolean = false,
     onToggleTranscriptSidebar: () -> Unit = {},
     classroomEnabled: Boolean = false,
+    syncStatus: SyncStatus = SyncStatus.IDLE,
 ) {
     // Tapping the active pen/highlighter/eraser/shapes tool toggles its settings panel.
     var pickerOpen by remember { mutableStateOf(true) }
@@ -1373,6 +1426,9 @@ private fun CanvasTopBar(
                     }
                 }
             }
+            // Sync status pill driven by SyncRepository state: always visible
+            // so conflicts/failures are noticed without leaving the canvas.
+            SyncStatusIndicator(syncStatus = syncStatus)
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 tonalElevation = 3.dp,

@@ -89,4 +89,32 @@ object SyncSnapshot {
 
     /** Short human label for a device id (first 8 chars). */
     fun shortDeviceId(deviceId: String): String = deviceId.take(8)
+
+    /**
+     * Conflict detection (pure, JVM-testable).
+     *
+     * A conflict exists when BOTH sides changed since the last successful
+     * sync: the newest inbound snapshot is newer than [lastSyncAtMs] AND the
+     * local notes were modified after [lastSyncAtMs]. Either side quiet means
+     * a clean fast-forward (no dialog). Returns the newest inbound snapshot
+     * that conflicts, or null.
+     *
+     * @param lastSyncAtMs last successful sync timestamp, null when never synced.
+     * @param localModifiedAtMs local modification timestamp, null when unknown/clean.
+     * @param inbound inbound snapshots newest-first (see [inboundSnapshots]).
+     */
+    fun detectConflict(
+        lastSyncAtMs: Long?,
+        localModifiedAtMs: Long?,
+        inbound: List<SnapshotMeta>,
+    ): SnapshotMeta? {
+        if (inbound.isEmpty()) return null
+        val newest = inbound.maxByOrNull { it.createdAt } ?: return null
+        // Never synced: first inbound is an import candidate, not a conflict.
+        // Local timestamp unknown: cannot prove local changes, stay quiet.
+        if (lastSyncAtMs == null || localModifiedAtMs == null) return null
+        if (localModifiedAtMs <= lastSyncAtMs) return null
+        if (newest.createdAt <= lastSyncAtMs) return null
+        return newest
+    }
 }
