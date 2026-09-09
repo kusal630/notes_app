@@ -43,7 +43,7 @@ class DiagnosticsTouchView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        val input = MotionEventParser.parse(event)
+        val input = MotionEventParser.parse(event) ?: return true
         val classified = engine.process(input)
         latestFrame = classified
         onFrame?.invoke(input, classified)

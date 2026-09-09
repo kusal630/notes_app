@@ -9,19 +9,18 @@ import android.view.MotionEvent
  */
 object MotionEventParser {
 
-    fun parse(event: MotionEvent): InputFrame {
+    fun parse(event: MotionEvent): InputFrame? {
         val action = when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> InputAction.DOWN
             MotionEvent.ACTION_MOVE -> InputAction.MOVE
             MotionEvent.ACTION_UP -> InputAction.UP
             MotionEvent.ACTION_POINTER_DOWN -> InputAction.POINTER_DOWN
-            MotionEvent.ACTION_POINTER_UP -> InputAction.POINTER_UP
+            MotionEvent.ACTION_POINTER_UP -> {
+                if ((event.flags and MotionEvent.FLAG_CANCELED) != 0) InputAction.CANCEL
+                else InputAction.POINTER_UP
+            }
             MotionEvent.ACTION_CANCEL -> InputAction.CANCEL
-            else -> return InputFrame(
-                action = InputAction.MOVE,
-                eventTimeNanos = event.eventTime * 1_000_000L,
-                contacts = emptyList(),
-            )
+            else -> return null
         }
 
         val addedPointerId: Int?
@@ -56,14 +55,16 @@ object MotionEventParser {
             }
         }
 
-        return InputFrame(
-            action = action,
-            eventTimeNanos = event.eventTime * 1_000_000L,
-            contacts = contacts,
-            history = history,
-            addedPointerId = addedPointerId,
-            liftedPointerId = liftedPointerId,
-        )
+return InputFrame(
+        action = action,
+        eventTimeNanos = event.eventTime * 1_000_000L,
+        contacts = contacts,
+        history = history,
+        addedPointerId = addedPointerId,
+        liftedPointerId = liftedPointerId,
+        edgeFlags = event.edgeFlags,
+        buttonState = event.buttonState,
+    )
     }
 
     private fun sample(
@@ -78,6 +79,10 @@ object MotionEventParser {
         val major = event.getToolMajor(pointerIndex)
         val minor = event.getToolMinor(pointerIndex)
         val orientation = event.getOrientation(pointerIndex)
+        val toolType = event.getToolType(pointerIndex)
+        val hoverDist = if (toolType == MotionEvent.TOOL_TYPE_STYLUS) {
+            event.getAxisValue(MotionEvent.AXIS_DISTANCE, pointerIndex)
+        } else null
 
         return RawTouchContact(
             pointerId = event.getPointerId(pointerIndex),
@@ -88,9 +93,12 @@ object MotionEventParser {
             toolMajorPx = major,
             toolMinorPx = minor,
             orientation = orientation,
-            toolTypeRaw = event.getToolType(pointerIndex),
+            toolTypeRaw = toolType,
             eventTimeNanos = timeMs * 1_000_000L,
             downTimeNanos = event.downTime * 1_000_000L,
+            flags = event.flags,
+            edgeFlags = event.edgeFlags,
+            hoverDistance = hoverDist,
         )
     }
 
@@ -99,17 +107,27 @@ object MotionEventParser {
         pointerIndex: Int,
         historyIndex: Int,
         timeMs: Long,
-    ): RawTouchContact = RawTouchContact(
-        pointerId = event.getPointerId(pointerIndex),
-        x = event.getHistoricalX(pointerIndex, historyIndex),
-        y = event.getHistoricalY(pointerIndex, historyIndex),
-        pressure = event.getHistoricalPressure(pointerIndex, historyIndex),
-        size = event.getHistoricalSize(pointerIndex, historyIndex),
-        toolMajorPx = event.getHistoricalToolMajor(pointerIndex, historyIndex),
-        toolMinorPx = event.getHistoricalToolMinor(pointerIndex, historyIndex),
-        orientation = event.getHistoricalOrientation(pointerIndex, historyIndex),
-        toolTypeRaw = event.getToolType(pointerIndex),
-        eventTimeNanos = timeMs * 1_000_000L,
-        downTimeNanos = event.downTime * 1_000_000L,
-    )
+    ): RawTouchContact {
+        val toolType = event.getToolType(pointerIndex)
+        val hoverDist = if (toolType == MotionEvent.TOOL_TYPE_STYLUS) {
+            event.getHistoricalAxisValue(MotionEvent.AXIS_DISTANCE, pointerIndex, historyIndex)
+        } else null
+
+        return RawTouchContact(
+            pointerId = event.getPointerId(pointerIndex),
+            x = event.getHistoricalX(pointerIndex, historyIndex),
+            y = event.getHistoricalY(pointerIndex, historyIndex),
+            pressure = event.getHistoricalPressure(pointerIndex, historyIndex),
+            size = event.getHistoricalSize(pointerIndex, historyIndex),
+            toolMajorPx = event.getHistoricalToolMajor(pointerIndex, historyIndex),
+            toolMinorPx = event.getHistoricalToolMinor(pointerIndex, historyIndex),
+            orientation = event.getHistoricalOrientation(pointerIndex, historyIndex),
+            toolTypeRaw = toolType,
+            eventTimeNanos = timeMs * 1_000_000L,
+            downTimeNanos = event.downTime * 1_000_000L,
+            flags = event.flags,
+            edgeFlags = event.edgeFlags,
+            hoverDistance = hoverDist,
+        )
+    }
 }

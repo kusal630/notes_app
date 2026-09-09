@@ -234,19 +234,20 @@ fun EditorScreen(
     val vm: EditorViewModel = viewModel(key = "editor-$pageId", factory = factory)
     val editorState by vm.editor.collectAsState()
 
-    if (editorState == null) {
+    val state = editorState
+    if (state == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Loading page…")
         }
         return
     }
 
-    val content by editorState!!.content.collectAsState()
-    val tool by editorState!!.tool.collectAsState()
-    val penStyle by editorState!!.penStyle.collectAsState()
-    val eraserSize by editorState!!.eraserSizeMm.collectAsState()
-    val shapeKind by editorState!!.shapeKind.collectAsState()
-    val selectedIds by editorState!!.selectedIds.collectAsState()
+    val content by state.content.collectAsState()
+    val tool by state.tool.collectAsState()
+    val penStyle by state.penStyle.collectAsState()
+    val eraserSize by state.eraserSizeMm.collectAsState()
+    val shapeKind by state.shapeKind.collectAsState()
+    val selectedIds by state.selectedIds.collectAsState()
     val settings by settingsFlow.collectAsState(initial = PalmRejectionSettings())
 
     // Page rail overlay + version history dialog state.
@@ -560,8 +561,8 @@ fun EditorScreen(
                 // navigation, tools and page actions hover over the canvas.
                 CanvasTopBar(
                     tool = tool,
-                    canUndo = editorState!!.canUndo,
-                    canRedo = editorState!!.canRedo,
+                    canUndo = state.canUndo,
+                    canRedo = state.canRedo,
                     onUndo = { vm.undo() },
                     onRedo = { vm.redo() },
                     onBack = onBack,
@@ -582,10 +583,10 @@ fun EditorScreen(
                         if (t != Tool.SELECT) vm.clearSelection()
                         when (t) {
                             Tool.HIGHLIGHTER -> if (penStyle.type != PenType.HIGHLIGHTER) {
-                                editorState!!.saveInkStyle()
+                                state.saveInkStyle()
                                 vm.setPenStyle(penStyle.copy(type = PenType.HIGHLIGHTER, opacity = 0.4f, widthMm = 5f))
                             }
-                            Tool.PEN -> editorState!!.restoreInkStyle()
+                            Tool.PEN -> state.restoreInkStyle()
                             else -> Unit
                         }
                     },
@@ -669,7 +670,7 @@ fun EditorScreen(
                                 view.texts = content.textObjects
                                 view.imageBitmaps = imageBitmapCache
                                 view.pdfBackground = pdfPageBitmap
-                                view.selectionBoundsMm = editorState!!.selectionBoundsMm
+                                view.selectionBoundsMm = state.selectionBoundsMm
                                 view.listener = vm.canvasListener
                                 view.autoEraseEnabled = settings.autoEraseEnabled
                                 view.scribbleSensitivity = settings.scribbleSensitivity

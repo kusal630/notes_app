@@ -115,8 +115,9 @@ class InkCanvasView @JvmOverloads constructor(
     var pdfBackground: android.graphics.Bitmap? = null
         set(value) {
             if (field !== value) {
-                field?.recycle()
+                val old = field
                 field = value
+                old?.let { bmp -> post { if (!bmp.isRecycled) bmp.recycle() } }
                 invalidate()
             }
         }
@@ -188,8 +189,12 @@ class InkCanvasView @JvmOverloads constructor(
     var imageBitmaps: Map<String, android.graphics.Bitmap> = emptyMap()
         set(value) {
             if (field !== value) {
-                field.forEach { it.value?.recycle() }
+                val old = field
                 field = value
+                for ((key, bmp) in old) {
+                    if (value[key] === bmp) continue
+                    post { if (!bmp.isRecycled) bmp.recycle() }
+                }
                 invalidate()
             }
         }
@@ -478,7 +483,7 @@ class InkCanvasView @JvmOverloads constructor(
                 maxDurationMs = s.maxDurationMs,
             )
         }
-        val input = MotionEventParser.parse(event)
+        val input = MotionEventParser.parse(event) ?: return true
 
         // The scroll bar and the palm-zone grip are direct-manipulation surfaces that
         // must never feed the palm rejection / writing pipeline.

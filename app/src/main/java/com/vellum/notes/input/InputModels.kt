@@ -74,6 +74,9 @@ data class RawTouchContact(
     val toolTypeRaw: Int,
     val eventTimeNanos: Long,
     val downTimeNanos: Long,
+    val flags: Int = 0,
+    val edgeFlags: Int = 0,
+    val hoverDistance: Float? = null,
 )
 
 /**
@@ -90,6 +93,10 @@ data class InputFrame(
     val addedPointerId: Int? = null,
     /** For UP/POINTER_UP: the pointer that just lifted. */
     val liftedPointerId: Int? = null,
+    /** Edge flags from the MotionEvent (EDGE_LEFT, EDGE_TOP, etc.); meaningful on DOWN. */
+    val edgeFlags: Int = 0,
+    /** Button state from the MotionEvent (stylus buttons, mouse buttons). */
+    val buttonState: Int = 0,
 ) {
     val pointerCount: Int get() = contacts.size
 }
