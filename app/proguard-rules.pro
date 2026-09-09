@@ -15,6 +15,12 @@
 -keep class com.vellum.notes.data.db.** { *; }
 -dontwarn androidx.room.paging.**
 
+# --- Input/Palm Rejection (critical for engine logic) ---
+# PalmRejectionEngine, RestingHandTracker, PointerMotionState use reflection-free
+# but R8 can still strip internal fields/methods without explicit keeps.
+-keep class com.vellum.notes.input.** { *; }
+-dontwarn com.vellum.notes.input.**
+
 # --- Vosk (com.alphacephei:vosk-android) ---
 # JNI bridge: native methods and the org.vosk classes must survive shrinking.
 -keep class org.vosk.** { *; }
