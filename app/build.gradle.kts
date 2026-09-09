@@ -18,8 +18,8 @@ android {
         applicationId = "com.vellum.notes"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.2.0"
+        versionCode = 3
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -28,32 +28,29 @@ android {
     }
 
     signingConfigs {
-        // Release signing via environment (keys never committed).
-        // CI / local signed builds: export VELLUM_KEYSTORE_PATH, VELLUM_KEYSTORE_PASSWORD,
-        // VELLUM_KEY_ALIAS, VELLUM_KEY_PASSWORD. When unset, the release build falls
-        // back to the default debug signature (F-Droid re-signs with its own keys).
+        // Release signing via gradle.properties (generated key in repo root for CI/local).
+        // For production, use a secure keystore not committed to git.
         create("release") {
-            val keystorePath = System.getenv("VELLUM_KEYSTORE_PATH")
+            val keystorePath = System.getenv("VELLUM_KEYSTORE_PATH") ?: project.findProperty("VELLUM_KEYSTORE_PATH") as String?
             if (!keystorePath.isNullOrBlank()) {
                 storeFile = file(keystorePath)
-                storePassword = System.getenv("VELLUM_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("VELLUM_KEY_ALIAS")
-                keyPassword = System.getenv("VELLUM_KEY_PASSWORD")
+                storePassword = System.getenv("VELLUM_KEYSTORE_PASSWORD") ?: project.findProperty("VELLUM_STORE_PASSWORD") as String?
+                keyAlias = System.getenv("VELLUM_KEY_ALIAS") ?: project.findProperty("VELLUM_KEY_ALIAS") as String?
+                keyPassword = System.getenv("VELLUM_KEY_PASSWORD") ?: project.findProperty("VELLUM_KEY_PASSWORD") as String?
             }
         }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Use the release keystore only when VELLUM_KEYSTORE_PATH is provided;
-            // otherwise AGP signs with the debug key so ./gradlew assembleRelease
-            // works out of the box for verification.
-            if (!System.getenv("VELLUM_KEYSTORE_PATH").isNullOrBlank()) {
+            val keystorePath = System.getenv("VELLUM_KEYSTORE_PATH") ?: project.findProperty("VELLUM_KEYSTORE_PATH") as String?
+            if (!keystorePath.isNullOrBlank()) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }

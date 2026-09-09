@@ -4,7 +4,7 @@
 
 Write naturally with a stylus or your finger. Raw touch input is analyzed in real time to reliably ignore palm rests, so only your pen or writing finger leaves ink — no proprietary or cloud service required. Everything stays on your device: notes, ink, images, transcripts.
 
-> ⬇️ **Download:** grab the latest APK from [**Releases**](https://github.com/kusal630/vellum/releases) (`app-release.apk`, release-signed, ~91MB — includes the on-device speech model).
+> ⬇️ **Download:** grab the latest APK from [**Releases**](https://github.com/kusal630/vellum/releases) (`app-release.apk`, release-signed, ~90MB — includes the on-device speech model).
 
 ## ✨ Features
 
