@@ -128,6 +128,7 @@ class InkCanvasView @JvmOverloads constructor(
             field = value
             // Pre-sort once per assignment: onDraw used to sort every frame.
             sortedImages = value.sortedBy { it.zOrder }
+            recomputeContentMaxY()
             invalidate()
         }
 
@@ -145,9 +146,10 @@ class InkCanvasView @JvmOverloads constructor(
     /**
      * Word-wrapped lines per text id, rebuilt when [texts] changes so onDraw never
      * splits/allocates per frame. Keyed by text id; ids are assigned by the editor
-     * state when the object is created.
+     * state when the object is created. Mutable so a rare cache miss in onDraw can
+     * be stored instead of re-wrapped every frame.
      */
-    private var textLinesCache: Map<Long, List<String>> = emptyMap()
+    private var textLinesCache: MutableMap<Long, List<String>> = HashMap()
 
     /** Scratch paint for text measuring (cache build) and drawing (onDraw). */
     private val scratchTextPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -168,7 +170,7 @@ class InkCanvasView @JvmOverloads constructor(
     /** Rebuilds [textLinesCache] for the current [texts] (runs on assignment, not per frame). */
     private fun rebuildTextLayoutCache() {
         if (texts.isEmpty()) {
-            textLinesCache = emptyMap()
+            textLinesCache = HashMap()
             return
         }
         val cache = HashMap<Long, List<String>>(texts.size)
@@ -301,6 +303,28 @@ class InkCanvasView @JvmOverloads constructor(
     private val lassoScreenRect = RectF()
     /** Screen-space clip of the current draw (partial under surgical invalidation). */
     private val screenClipRect = android.graphics.Rect()
+    /** Scratch rects for bitmap underlays: drawBitmap took fresh Rect/RectF per item/frame. */
+    private val pdfSrcRect = android.graphics.Rect()
+    private val pdfDstRect = RectF()
+    private val imageSrcRect = android.graphics.Rect()
+    private val imageDstRect = RectF()
+    /** Scratch screen-space rect for the selection overlay (was a fresh RectF per frame). */
+    private val selectionScreenRect = RectF()
+    /** Reused live-stroke geometry/paint: the active stroke redraws every MOVE frame. */
+    private val livePath = Path()
+    private val livePaint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private var livePaintStyle: PenStyle? = null
+    /**
+     * Cached bottom edge of page content in world mm (scroll-bar extent). Recomputed
+     * when the content lists change and extended incrementally on commit, so onDraw
+     * reads an O(1) field instead of scanning every stroke/shape/image per frame.
+     */
+    private var contentMaxYMm: Float = 0f
 
     private val selectionPaint = Paint().apply {
         style = Paint.Style.STROKE
@@ -410,7 +434,7 @@ class InkCanvasView @JvmOverloads constructor(
     )
 
     private var displayStrokes: MutableList<CachedStroke> = mutableListOf()
-    private var displayShapes: List<CachedShape> = emptyList()
+    private var displayShapes: MutableList<CachedShape> = mutableListOf()
     private val displayStrokeById = HashMap<Long, CachedStroke>()
     private val displayShapeById = HashMap<Long, CachedShape>()
     private var strokesVersion = 0
@@ -714,7 +738,17 @@ class InkCanvasView @JvmOverloads constructor(
     }
 
     /** Bottom edge of all page content in world mm (used to size the scroll bar). */
-    private fun contentExtentMm(): Float {
+    private fun contentExtentMm(): Float =
+        // O(1) read: [contentMaxYMm] is maintained on content change (see
+        // [recomputeContentMaxY]); onDraw used to scan every point per frame.
+        (contentMaxYMm + 80f).coerceAtLeast(500f)
+
+    /**
+     * Recomputes [contentMaxYMm] from the current content lists. Called when a list
+     * is assigned or a full geometry rebuild runs (erase/undo/load); incremental
+     * commits extend the cached max directly instead.
+     */
+    private fun recomputeContentMaxY() {
         var maxY = 0f
         for (stroke in strokes) {
             val pts = stroke.pointsPacked
@@ -730,10 +764,10 @@ class InkCanvasView @JvmOverloads constructor(
             }
         }
         for (im in images) {
-            if (im.y + im.height > maxY) maxY = im.y + im.height
+            val b = im.y + im.height
+            if (b > maxY) maxY = b
         }
-        // A short/empty page still gets a scrollable extent so the bar behaves predictably.
-        return (maxY + 80f).coerceAtLeast(500f)
+        contentMaxYMm = maxY
     }
 
     // --- writing ---
@@ -1446,6 +1480,7 @@ class InkCanvasView @JvmOverloads constructor(
         val item = buildStrokeGeometry(stroke)
         displayStrokes.add(item)
         displayStrokeById[stroke.id] = item
+        if (item.bounds.bottom > contentMaxYMm) contentMaxYMm = item.bounds.bottom
     }
 
     private fun rebuildStrokeGeometry() {
@@ -1456,6 +1491,7 @@ class InkCanvasView @JvmOverloads constructor(
             displayStrokes.add(item)
             displayStrokeById[stroke.id] = item
         }
+        recomputeContentMaxY()
     }
 
     /**
@@ -1490,19 +1526,20 @@ class InkCanvasView @JvmOverloads constructor(
     private fun appendShapeGeometry(shape: ShapeObject) {
         if (displayShapeById.containsKey(shape.id)) return
         val item = buildShapeGeometry(shape)
-        displayShapes = displayShapes + item
+        displayShapes.add(item)
         displayShapeById[shape.id] = item
+        if (item.bounds.bottom > contentMaxYMm) contentMaxYMm = item.bounds.bottom
     }
 
     private fun rebuildShapeGeometry() {
-        val items = ArrayList<CachedShape>(shapes.size)
         displayShapeById.clear()
+        displayShapes.clear()
         for (shape in shapes) {
             val item = buildShapeGeometry(shape)
-            items += item
+            displayShapes.add(item)
             displayShapeById[shape.id] = item
         }
-        displayShapes = items
+        recomputeContentMaxY()
     }
 
     /** Synchronous variant of [appendShapeGeometry] used at shape commit time. */
@@ -1520,6 +1557,36 @@ class InkCanvasView @JvmOverloads constructor(
             canvas.restore()
         }
         canvas.drawPath(item.path, item.paint)
+    }
+
+    /**
+     * Draws the in-progress stroke without per-frame allocations for the common
+     * plain-polyline pens. The path and paints are scratch fields rewound/updated
+     * in place; variable-width (fountain/calligraphy) and pencil grain keep using
+     * the shared renderer so the live stroke still matches the committed one.
+     */
+    private fun drawLiveStroke(canvas: Canvas, pts: List<Point>, style: PenStyle) {
+        val type = style.type
+        if (type == com.vellum.notes.model.PenType.FOUNTAIN ||
+            type == com.vellum.notes.model.PenType.CALLIGRAPHY ||
+            type == com.vellum.notes.model.PenType.PENCIL
+        ) {
+            val live = Stroke(id = 0L, style = style, pointsPacked = Stroke.pack(pts))
+            renderer.drawStroke(canvas, live, 1f)
+            return
+        }
+        if (livePaintStyle != style) {
+            livePaintStyle = style
+            val alpha = (style.opacity.coerceIn(0f, 1f) * 255).toInt()
+            livePaint.color = (style.colorArgb and 0xFFFFFF).toInt() or (alpha shl 24)
+            livePaint.strokeWidth = style.widthMm.coerceAtLeast(0.2f)
+        }
+        livePath.rewind()
+        livePath.moveTo(pts[0].x, pts[0].y)
+        for (i in 1 until pts.size) {
+            livePath.lineTo(pts[i].x, pts[i].y)
+        }
+        canvas.drawPath(livePath, livePaint)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -1560,10 +1627,12 @@ class InkCanvasView @JvmOverloads constructor(
                 val (pdfW, pdfH) = com.vellum.notes.pdf.PdfImporter.worldSizeMm(bmp.width, bmp.height)
                 // Cull the full-page underlay when the viewport shows none of it.
                 if (worldClip.intersects(0f, 0f, pdfW, pdfH)) {
+                    pdfSrcRect.set(0, 0, bmp.width, bmp.height)
+                    pdfDstRect.set(0f, 0f, pdfW, pdfH)
                     canvas.drawBitmap(
                         bmp,
-                        android.graphics.Rect(0, 0, bmp.width, bmp.height),
-                        android.graphics.RectF(0f, 0f, pdfW, pdfH),
+                        pdfSrcRect,
+                        pdfDstRect,
                         null,
                     )
                 }
@@ -1578,10 +1647,12 @@ class InkCanvasView @JvmOverloads constructor(
             }
             val bmp = imageBitmaps[im.fileRef] ?: continue
             if (bmp.isRecycled) continue
+            imageSrcRect.set(0, 0, bmp.width, bmp.height)
+            imageDstRect.set(im.x, im.y, im.x + im.width, im.y + im.height)
             canvas.drawBitmap(
                 bmp,
-                android.graphics.Rect(0, 0, bmp.width, bmp.height),
-                android.graphics.RectF(im.x, im.y, im.x + im.width, im.y + im.height),
+                imageSrcRect,
+                imageDstRect,
                 null,
             )
         }
@@ -1601,21 +1672,34 @@ class InkCanvasView @JvmOverloads constructor(
             textPaint.color = t.colorArgb.toInt()
             textPaint.textSize = t.fontSizeMm
             textPaint.typeface = typefaceFor(t.fontFamily, t.bold)
-            canvas.save()
-            canvas.rotate(t.rotation, t.x, t.y)
             // Simple word-wrap into the box width; lines flow downward from the top edge.
-            val lines = textLinesCache[t.id]
-                ?: com.vellum.notes.render.TextLayout.wrap(
+            // A rare cache miss (id not seen at assignment) is stored so it is
+            // wrapped once, not on every frame.
+            var lines = textLinesCache[t.id]
+            if (lines == null) {
+                lines = com.vellum.notes.render.TextLayout.wrap(
                     t.text,
                     { s -> textPaint.measureText(s) },
                     t.width,
                 )
-            var y = t.y + t.fontSizeMm
-            for (line in lines) {
-                canvas.drawText(line, t.x, y, textPaint)
-                y += t.fontSizeMm * 1.35f
+                textLinesCache[t.id] = lines
             }
-            canvas.restore()
+            if (t.rotation == 0f) {
+                var y = t.y + t.fontSizeMm
+                for (line in lines) {
+                    canvas.drawText(line, t.x, y, textPaint)
+                    y += t.fontSizeMm * 1.35f
+                }
+            } else {
+                canvas.save()
+                canvas.rotate(t.rotation, t.x, t.y)
+                var y = t.y + t.fontSizeMm
+                for (line in lines) {
+                    canvas.drawText(line, t.x, y, textPaint)
+                    y += t.fontSizeMm * 1.35f
+                }
+                canvas.restore()
+            }
         }
         for (item in displayStrokes) {
             if (item.type == com.vellum.notes.model.PenType.HIGHLIGHTER &&
@@ -1652,14 +1736,19 @@ class InkCanvasView @JvmOverloads constructor(
             val pts = builder.livePoints
             // Use the style captured at stroke start: the live stroke must always match
             // what gets committed on pen-up, even if the toolbar changed mid-stroke.
-            val live = Stroke(id = 0L, style = builder.style, pointsPacked = Stroke.pack(pts))
-            renderer.drawStroke(canvas, live, 1f)
+            drawLiveStroke(canvas, pts, builder.style)
         }
         canvas.restore()
 
         // Screen-space selection overlays.
         selectionBoundsMm?.let { bounds ->
-            canvas.drawRect(worldRectToScreen(bounds), selectionPaint)
+            selectionScreenRect.set(
+                bounds.left * scale + offsetX,
+                bounds.top * scale + offsetY,
+                bounds.right * scale + offsetX,
+                bounds.bottom * scale + offsetY,
+            )
+            canvas.drawRect(selectionScreenRect, selectionPaint)
             // Feature 3: eight resize handles — corners (proportional) and edge midpoints
             // (single-axis). Drawn in screen space so they stay grabbable at any zoom.
             drawSelectionHandles(canvas, bounds)
@@ -1678,8 +1767,10 @@ class InkCanvasView @JvmOverloads constructor(
 
         // Palm rest zone: only drawn in MANUAL mode — a translucent reserved region the
         // user placed and can drag by its grip handle. AUTO mode is purely automatic
-        // (contact-size based) and deliberately shows no box.
-        syncPalmZoneRect()
+        // (contact-size based) and deliberately shows no box. Uses the last synced
+        // rect: the engine/zone state is already synced on size change, zone edits,
+        // and every touch frame — re-syncing (and allocating) here every draw is
+        // unnecessary on the hot path.
         lastZoneRect?.let { zone ->
             canvas.drawRect(zone.leftPx, zone.topPx, zone.rightPx, zone.bottomPx, zoneFillPaint)
             canvas.drawRect(zone.leftPx, zone.topPx, zone.rightPx, zone.bottomPx, zoneStrokePaint)
