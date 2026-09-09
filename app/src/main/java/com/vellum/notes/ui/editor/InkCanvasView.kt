@@ -409,7 +409,7 @@ class InkCanvasView @JvmOverloads constructor(
         val bounds: RectF,
     )
 
-    private var displayStrokes: List<CachedStroke> = emptyList()
+    private var displayStrokes: MutableList<CachedStroke> = mutableListOf()
     private var displayShapes: List<CachedShape> = emptyList()
     private val displayStrokeById = HashMap<Long, CachedStroke>()
     private val displayShapeById = HashMap<Long, CachedShape>()
@@ -1444,19 +1444,18 @@ class InkCanvasView @JvmOverloads constructor(
         // translucent highlighters.
         if (displayStrokeById.containsKey(stroke.id)) return
         val item = buildStrokeGeometry(stroke)
-        displayStrokes = displayStrokes + item
+        displayStrokes.add(item)
         displayStrokeById[stroke.id] = item
     }
 
     private fun rebuildStrokeGeometry() {
-        val items = ArrayList<CachedStroke>(strokes.size)
         displayStrokeById.clear()
+        displayStrokes.clear()
         for (stroke in strokes) {
             val item = buildStrokeGeometry(stroke)
-            items += item
+            displayStrokes.add(item)
             displayStrokeById[stroke.id] = item
         }
-        displayStrokes = items
     }
 
     /**
