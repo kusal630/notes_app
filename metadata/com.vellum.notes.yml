@@ -1,0 +1,46 @@
+Categories:
+  - Writing
+License: GPL-3.0-or-later
+AuthorName: codeRed
+WebSite:
+SourceCode: https://github.com/kusal630/vellum
+IssueTracker: https://github.com/kusal630/vellum/issues
+
+AutoName: Vellum
+Summary: Offline handwriting notes with palm rejection
+Description: |
+  Vellum is a private, fully offline handwriting notes application.
+  A built-in software palm-rejection pipeline analyzes raw touch input to
+  reliably ignore palm rests so only your pen or writing finger leaves ink.
+
+  Features: pen, highlighter, eraser and selection tools; shapes that can be
+  selected, moved, or resized together with their contained content; optional
+  Classroom Notes on-device lecture transcription (offline Vosk speech model,
+  transcript saved with the note); multi-page notebooks; infinite canvas with
+  pinch-to-zoom; PDF export with sharing; light and dark themes; input
+  diagnostics. 100% offline with no accounts, no tracking, and no ads.
+
+  Permissions: none requested by default. Classroom Notes asks for the
+  microphone (RECORD_AUDIO) only when the user starts a classroom recording;
+  the app works fully without granting it. No internet permission, so audio
+  never leaves the device.
+
+  Note: the Vosk speech model (~40 MB) is fetched at build time by the
+  downloadVoskModel Gradle task and is not committed to git. Builds without
+  it succeed — Classroom Notes is then disabled gracefully.
+
+RepoType: git
+Repo: https://github.com/kusal630/vellum
+
+Builds:
+  - versionName: 1.2.0
+    versionCode: 2
+    commit: v1.2.0
+    subdir: .
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 1.2.0
+CurrentVersionCode: 2

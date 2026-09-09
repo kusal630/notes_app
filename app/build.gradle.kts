@@ -27,6 +27,22 @@ android {
         }
     }
 
+    signingConfigs {
+        // Release signing via environment (keys never committed).
+        // CI / local signed builds: export VELLUM_KEYSTORE_PATH, VELLUM_KEYSTORE_PASSWORD,
+        // VELLUM_KEY_ALIAS, VELLUM_KEY_PASSWORD. When unset, the release build falls
+        // back to the default debug signature (F-Droid re-signs with its own keys).
+        create("release") {
+            val keystorePath = System.getenv("VELLUM_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("VELLUM_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("VELLUM_KEY_ALIAS")
+                keyPassword = System.getenv("VELLUM_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -34,6 +50,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Use the release keystore only when VELLUM_KEYSTORE_PATH is provided;
+            // otherwise AGP signs with the debug key so ./gradlew assembleRelease
+            // works out of the box for verification.
+            if (!System.getenv("VELLUM_KEYSTORE_PATH").isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
