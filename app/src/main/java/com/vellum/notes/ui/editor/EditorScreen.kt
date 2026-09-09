@@ -90,6 +90,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -144,7 +152,6 @@ import com.vellum.notes.speech.AudioCaptureService
 import com.vellum.notes.speech.ModelDiscovery
 import com.vellum.notes.speech.SpeechController
 import com.vellum.notes.speech.SummaryGenerator
-import com.vellum.notes.ui.theme.VellumAccent
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -403,10 +410,18 @@ fun EditorScreen(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     PaperTemplates.ALL.forEach { t ->
+                        val templateSelected = currentSummary?.templateId == t.id
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
+                                .defaultMinSize(minHeight = 48.dp)
+                                .semantics {
+                                    contentDescription = "Template ${t.label}"
+                                    selected = templateSelected
+                                    stateDescription = if (templateSelected) "${t.label} template selected" else "${t.label} template"
+                                    role = Role.RadioButton
+                                }
+                                .clickable(role = Role.RadioButton) {
                                     vm.setPageTemplate(t.id)
                                     showTemplateDialog = false
                                 }
@@ -416,7 +431,7 @@ fun EditorScreen(
                             Icon(
                                 Icons.Filled.GridOn,
                                 contentDescription = null,
-                                tint = if (currentSummary?.templateId == t.id) MaterialTheme.colorScheme.primary
+                                tint = if (templateSelected) MaterialTheme.colorScheme.primary
                                        else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.width(12.dp))
@@ -556,7 +571,11 @@ fun EditorScreen(
                 showTranscriptSidebar = false
             }
 
-            Column(Modifier.fillMaxSize()) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .semantics { isTraversalGroup = true },
+            ) {
                 // Floating pills up top (never under the palm at the bottom):
                 // navigation, tools and page actions hover over the canvas.
                 CanvasTopBar(
@@ -646,10 +665,20 @@ fun EditorScreen(
                 // rail is a hideable overlay toggled from the top bar. Keying by pageId
                 // recreates the view on page switch so the engine resets and any
                 // in-progress stroke is finalized onto the page it was drawn on.
-                Box(Modifier.weight(1f)) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .semantics { isTraversalGroup = true; traversalIndex = 1f },
+                ) {
                     key(pageId) {
                         AndroidView(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .semantics {
+                                    contentDescription = "Handwriting canvas with ${content.strokes.size} strokes. " +
+                                        "Active tool is ${tool.name}. Use the toolbar above to change tools."
+                                    traversalIndex = 1f
+                                },
                             factory = { ctx ->
                                 InkCanvasView(ctx).also { view ->
                                     view.capabilities = capabilities
@@ -841,7 +870,10 @@ private fun ClassroomSidebar(
 ) {
     var tab by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
-    Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
+    Surface(
+        modifier = modifier.semantics { isTraversalGroup = true; traversalIndex = 2f },
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
         Column(Modifier.fillMaxSize().padding(12.dp)) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -996,12 +1028,19 @@ private fun ClassroomSidebar(
 private fun SidebarTab(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
+            .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(
                 if (selected) MaterialTheme.colorScheme.primaryContainer
                 else MaterialTheme.colorScheme.surface
             )
-            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = "$label tab"
+                this.selected = selected
+                stateDescription = if (selected) "$label tab selected" else label
+                this.role = Role.Tab
+            }
+            .clickable(role = Role.Tab, onClickLabel = label) { onClick() }
             .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1086,7 +1125,10 @@ private fun PageRail(
     onHistoryPage: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    Surface(modifier = modifier, color = MaterialTheme.colorScheme.surfaceVariant) {
+    Surface(
+        modifier = modifier.semantics { isTraversalGroup = true; traversalIndex = 3f },
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
             // A thin, draggable scroll bar over the page list: with many pages you can see
             // where you are and jump. Drawn in-house (not the foundation Scrollbar API,
@@ -1117,9 +1159,16 @@ private fun PageRail(
                                             else MaterialTheme.colorScheme.outlineVariant,
                                             shape = RoundedCornerShape(6.dp),
                                         )
+                                        .semantics {
+                                            contentDescription = "Page ${page.title}"
+                                            selected = isCurrent
+                                            stateDescription = if (isCurrent) "Current page ${page.title}" else "Page ${page.title}"
+                                        }
                                         .combinedClickable(
                                             onClick = { onSelectPage(page.id) },
                                             onLongClick = { menuOpen = true },
+                                            onClickLabel = "Open page ${page.title}",
+                                            onLongClickLabel = "Page options",
                                         ),
                                 )
                             } else {
@@ -1158,7 +1207,9 @@ private fun PageRail(
             if (compact) {
                 IconButton(
                     onClick = onNewPage,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .size(48.dp),
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = "New page")
                 }
@@ -1192,7 +1243,17 @@ private fun PageThumbnail(page: PageSummary, selected: Boolean, onClick: () -> U
                 else MaterialTheme.colorScheme.outlineVariant,
                 shape = RoundedCornerShape(6.dp),
             )
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .semantics {
+                contentDescription = "Page ${page.title}"
+                this.selected = selected
+                stateDescription = if (selected) "Current page ${page.title}" else "Page ${page.title}"
+            }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+                onClickLabel = "Open page ${page.title}",
+                onLongClickLabel = "Page options",
+            ),
         contentAlignment = Alignment.BottomStart,
     ) {
         Text(
@@ -1343,8 +1404,14 @@ private fun CanvasTopBar(
         }
     }
     val showPicker = pickerOpen && (tool == Tool.PEN || tool == Tool.HIGHLIGHTER || tool == Tool.ERASER || tool == Tool.SHAPES)
-    Column(Modifier.fillMaxWidth()) {
+    // TalkBack traversal: toolbar (0) -> canvas (1) -> transcript (2) -> page rail (3).
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .semantics { isTraversalGroup = true; traversalIndex = 0f },
+    ) {
         // Floating pills hovering over the canvas: navigation, tools, actions.
+        // Every icon-only target is 48dp with an explicit contentDescription.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1362,13 +1429,24 @@ private fun CanvasTopBar(
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.size(48.dp),
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                    IconButton(onClick = onUndo, enabled = canUndo) {
+                    IconButton(
+                        onClick = onUndo,
+                        enabled = canUndo,
+                        modifier = Modifier.size(48.dp),
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
                     }
-                    IconButton(onClick = onRedo, enabled = canRedo) {
+                    IconButton(
+                        onClick = onRedo,
+                        enabled = canRedo,
+                        modifier = Modifier.size(48.dp),
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
                     }
                 }
@@ -1452,15 +1530,26 @@ private fun CanvasTopBar(
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = onToggleRail) {
+                    IconButton(
+                        onClick = onToggleRail,
+                        modifier = Modifier.size(48.dp),
+                    ) {
                         Icon(Icons.Filled.Menu, contentDescription = "Show or hide pages")
                     }
-                    IconButton(onClick = onExportPdf) {
+                    IconButton(
+                        onClick = onExportPdf,
+                        modifier = Modifier.size(48.dp),
+                    ) {
                         Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF")
                     }
                     IconButton(
                         onClick = onToggleClassroom,
                         enabled = classroomEnabled,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .semantics {
+                                stateDescription = if (isRecording) "Recording in progress" else "Not recording"
+                            },
                     ) {
                         Icon(
                             Icons.Filled.Mic,
@@ -1472,6 +1561,7 @@ private fun CanvasTopBar(
                     IconButton(
                         onClick = onToggleTranscriptSidebar,
                         enabled = transcriptAvailable,
+                        modifier = Modifier.size(48.dp),
                     ) {
                         Icon(
                             Icons.AutoMirrored.Filled.Article,
@@ -1511,12 +1601,18 @@ private fun CanvasTopBar(
                                             else MaterialTheme.colorScheme.surfaceVariant
                                         )
                                         .border(
-                                            width = 1.dp,
+                                            width = if (selected) 2.dp else 1.dp,
                                             color = if (selected) MaterialTheme.colorScheme.primary
                                             else MaterialTheme.colorScheme.outlineVariant,
                                             shape = RoundedCornerShape(14.dp),
                                         )
-                                        .clickable { onPenType(type) }
+                                        .semantics {
+                                            contentDescription = "Pen type $label"
+                                            this.selected = selected
+                                            stateDescription = if (selected) "$label pen selected" else "$label pen"
+                                            this.role = Role.RadioButton
+                                        }
+                                        .clickable(role = Role.RadioButton) { onPenType(type) }
                                         .padding(horizontal = 10.dp, vertical = 4.dp),
                                 ) {
                                     Text(label, style = MaterialTheme.typography.labelMedium)
@@ -1546,12 +1642,18 @@ private fun CanvasTopBar(
                                     .size(48.dp)
                                     .clip(CircleShape)
                                     .border(
-                                        width = if (selected) 2.dp else 1.dp,
+                                        width = if (selected) 3.dp else 1.dp,
                                         color = if (selected) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.outlineVariant,
                                         shape = CircleShape,
                                     )
-                                    .clickable { onSmoothingChange(mode) },
+                                    .semantics {
+                                        contentDescription = "Smoothing ${mode.name}"
+                                        this.selected = selected
+                                        stateDescription = if (selected) "Smoothing ${mode.name} selected" else "Smoothing ${mode.name}"
+                                        this.role = Role.RadioButton
+                                    }
+                                    .clickable(role = Role.RadioButton) { onSmoothingChange(mode) },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(mode.name.substring(0, 1), style = MaterialTheme.typography.labelSmall)
@@ -1577,12 +1679,18 @@ private fun CanvasTopBar(
                                         else MaterialTheme.colorScheme.surfaceVariant
                                     )
                                     .border(
-                                        width = 1.dp,
+                                        width = if (selected) 2.dp else 1.dp,
                                         color = if (selected) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.outlineVariant,
                                         shape = RoundedCornerShape(14.dp),
                                     )
-                                    .clickable { onShapeKind(kind) }
+                                    .semantics {
+                                        contentDescription = "Shape $label"
+                                        this.selected = selected
+                                        stateDescription = if (selected) "$label shape selected" else "$label shape"
+                                        this.role = Role.RadioButton
+                                    }
+                                    .clickable(role = Role.RadioButton) { onShapeKind(kind) }
                                     .padding(horizontal = 10.dp, vertical = 4.dp),
                             ) {
                                 Text(label, style = MaterialTheme.typography.labelMedium)
@@ -1608,12 +1716,18 @@ private fun CanvasTopBar(
                                     .size(48.dp)
                                     .clip(CircleShape)
                                     .border(
-                                        width = if (selected) 2.dp else 1.dp,
+                                        width = if (selected) 3.dp else 1.dp,
                                         color = if (selected) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.outlineVariant,
                                         shape = CircleShape,
                                     )
-                                    .clickable { onEraserSize(s) },
+                                    .semantics {
+                                        contentDescription = "Eraser size ${s.toInt()} millimeters"
+                                        this.selected = selected
+                                        stateDescription = if (selected) "Selected eraser size ${s.toInt()} millimeters" else "Eraser size ${s.toInt()} millimeters"
+                                        this.role = Role.RadioButton
+                                    }
+                                    .clickable(role = Role.RadioButton) { onEraserSize(s) },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Box(
@@ -1638,38 +1752,56 @@ private fun CanvasTopBar(
                         )
                         if (selectedCount > 0) {
                             if (canEditText) {
-                                TextButton(onClick = onEditText) {
+                                TextButton(
+                                    onClick = onEditText,
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                ) {
                                     Icon(Icons.Filled.Edit, contentDescription = null)
                                     Spacer(Modifier.width(4.dp))
                                     Text("Edit text")
                                 }
                             }
                             if (canSmooth) {
-                                TextButton(onClick = onSmoothSelection) {
+                                TextButton(
+                                    onClick = onSmoothSelection,
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                ) {
                                     Icon(Icons.Filled.AutoFixHigh, contentDescription = null)
                                     Spacer(Modifier.width(4.dp))
                                     Text("Smooth")
                                 }
                             }
                             if (canConvert) {
-                                TextButton(onClick = onConvertSelection) {
+                                TextButton(
+                                    onClick = onConvertSelection,
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                ) {
                                     Icon(Icons.Filled.Title, contentDescription = null)
                                     Spacer(Modifier.width(4.dp))
                                     Text("Convert")
                                 }
                             }
-                            TextButton(onClick = onDuplicateSelection) {
+                            TextButton(
+                                onClick = onDuplicateSelection,
+                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                            ) {
                                 Icon(Icons.Filled.ContentCopy, contentDescription = null)
                                 Spacer(Modifier.width(4.dp))
                                 Text("Duplicate")
                             }
-                            TextButton(onClick = onDeleteSelection) {
+                            TextButton(
+                                onClick = onDeleteSelection,
+                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                            ) {
                                 Icon(Icons.Filled.Delete, contentDescription = null)
                                 Spacer(Modifier.width(4.dp))
                                 Text("Delete")
                             }
                         } else {
-                            TextButton(onClick = onSelectAll) { Text("Select all") }
+                            TextButton(
+                                onClick = onSelectAll,
+                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                            ) { Text("Select all") }
                         }
                     }
                 }
@@ -1684,24 +1816,33 @@ private fun CanvasTopBar(
 @Composable
 private fun ColorRow(penStyle: PenStyle, onColor: (Long) -> Unit) {
     Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .semantics { isTraversalGroup = true },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Color", style = MaterialTheme.typography.labelMedium)
         PALETTE.forEach { c ->
             val selected = penStyle.colorArgb == c
+            val hex = "#%06X".format(c and 0xFFFFFF)
             Box(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
                     .background(Color(c))
                     .border(
-                        width = 2.dp,
-                        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        width = if (selected) 3.dp else 2.dp,
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
                         shape = CircleShape,
                     )
-                    .clickable { onColor(c) },
+                    .semantics {
+                        contentDescription = "Pen color $hex"
+                        this.selected = selected
+                        stateDescription = if (selected) "Selected color $hex" else "Color $hex"
+                        this.role = Role.RadioButton
+                    }
+                    .clickable(role = Role.RadioButton) { onColor(c) },
                 contentAlignment = Alignment.Center,
             ) {}
         }
@@ -1710,8 +1851,12 @@ private fun ColorRow(penStyle: PenStyle, onColor: (Long) -> Unit) {
 
 @Composable
 private fun WidthRow(penStyle: PenStyle, onWidth: (Float) -> Unit) {
+    // Discrete width "slider": each dot announces its value + selected state so
+    // TalkBack users get the same stateDescription a Slider would provide.
     Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .semantics { isTraversalGroup = true },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -1723,12 +1868,18 @@ private fun WidthRow(penStyle: PenStyle, onWidth: (Float) -> Unit) {
                     .size(48.dp)
                     .clip(CircleShape)
                     .border(
-                        width = if (selected) 2.dp else 1.dp,
+                        width = if (selected) 3.dp else 1.dp,
                         color = if (selected) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.outlineVariant,
                         shape = CircleShape,
                     )
-                    .clickable { onWidth(w) },
+                    .semantics {
+                        contentDescription = "Pen width $w millimeters"
+                        this.selected = selected
+                        stateDescription = if (selected) "Selected width $w millimeters" else "$w millimeters"
+                        this.role = Role.RadioButton
+                    }
+                    .clickable(role = Role.RadioButton) { onWidth(w) },
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
@@ -1750,7 +1901,8 @@ private fun ToolButton(
     content: @Composable () -> Unit,
 ) {
     // Nebo-style compact strip button: icon-only 48dp target, pill highlight +
-    // accent underline for the active tool. Label stays as content description.
+    // accent underline for the active tool. Exposes role + selected state to
+    // TalkBack so the toolbar is fully traversable with state announcements.
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -1758,16 +1910,23 @@ private fun ToolButton(
             .clip(RoundedCornerShape(14.dp))
             .background(if (selected) MaterialTheme.colorScheme.primaryContainer
                 else Color.Transparent)
-            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = label
+                this.selected = selected
+                stateDescription = if (selected) "$label tool selected" else "$label tool"
+                this.role = Role.Button
+            }
+            .clickable(onClick = onClick, role = Role.Button, onClickLabel = label)
             .padding(4.dp),
     ) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { content() }
-        // Active tool indicator: 2dp accent underline (4dp spacing grid).
+        // Active tool indicator: 3dp accent underline (4dp spacing grid) using
+        // the contrast-audited theme tertiary (>= 4.5:1 on both themes).
         Box(
             modifier = Modifier
-                .size(width = 24.dp, height = 2.dp)
+                .size(width = 24.dp, height = 3.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(if (selected) VellumAccent else Color.Transparent)
+                .background(if (selected) MaterialTheme.colorScheme.tertiary else Color.Transparent)
         )
     }
 }
@@ -1779,10 +1938,16 @@ private fun DisabledToolButton(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+        modifier = Modifier
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics {
+                contentDescription = "$description unavailable"
+                stateDescription = "Disabled"
+            }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
-        Icon(icon, contentDescription = description, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
-        Text("—", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f))
+        Text("—", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f))
     }
 }
 
@@ -1810,7 +1975,7 @@ private fun ColorRail(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier,
+        modifier = modifier.semantics { isTraversalGroup = true },
         shape = RoundedCornerShape(28.dp),
         tonalElevation = 3.dp,
         shadowElevation = 2.dp,
@@ -1821,17 +1986,20 @@ private fun ColorRail(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             RAIL_COLORS.forEach { color ->
+                val hex = "#%06X".format(color and 0xFFFFFF)
                 RailDot(
                     selected = penStyle.colorArgb == color,
                     onClick = { onColor(color) },
+                    description = "Quick color $hex",
+                    selectedDescription = "Selected quick color $hex",
                 ) {
                     Box(Modifier.size(28.dp).clip(CircleShape).background(Color(color)))
                 }
             }
-            // Full palette opener.
+            // Full palette opener: 48dp target with expanded/collapsed state.
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(RAINBOW_BRUSH)
                     .border(
@@ -1840,13 +2008,20 @@ private fun ColorRail(
                         else MaterialTheme.colorScheme.outlineVariant,
                         shape = CircleShape,
                     )
-                    .clickable(onClick = onOpenPalette),
+                    .semantics {
+                        contentDescription = "Open full color palette"
+                        stateDescription = if (paletteOpen) "Palette expanded" else "Palette collapsed"
+                        this.role = Role.Button
+                    }
+                    .clickable(role = Role.Button, onClickLabel = "Open full color palette") { onOpenPalette() },
             )
             HorizontalDivider(Modifier.width(24.dp))
             RAIL_WIDTHS_MM.forEach { w ->
                 RailDot(
                     selected = kotlin.math.abs(penStyle.widthMm - w) < 0.2f,
                     onClick = { onWidth(w) },
+                    description = "Quick width $w millimeters",
+                    selectedDescription = "Selected quick width $w millimeters",
                 ) {
                     Box(
                         Modifier.size((10 + w * 6).toInt().coerceAtMost(26).dp)
@@ -1863,11 +2038,14 @@ private fun ColorRail(
 private fun RailDot(
     selected: Boolean,
     onClick: () -> Unit,
+    description: String = "Rail option",
+    selectedDescription: String = "Selected rail option",
     content: @Composable () -> Unit,
 ) {
+    // 48dp minimum touch target with TalkBack selected state.
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .border(
                 width = if (selected) 3.dp else 1.dp,
@@ -1875,7 +2053,13 @@ private fun RailDot(
                 else MaterialTheme.colorScheme.outlineVariant,
                 shape = CircleShape,
             )
-            .clickable(onClick = onClick),
+            .semantics {
+                contentDescription = description
+                this.selected = selected
+                stateDescription = if (selected) selectedDescription else description
+                this.role = Role.RadioButton
+            }
+            .clickable(role = Role.RadioButton) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
         content()
